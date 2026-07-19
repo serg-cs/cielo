@@ -1,0 +1,378 @@
+use std::{
+    collections::HashSet,
+    env,
+    fs::{self, File},
+    io::{BufWriter, Write},
+    path::{Component, Path, PathBuf},
+};
+
+use anyhow::{Context, Result, bail};
+use serde::Serialize;
+use tempfile::{Builder, TempDir};
+use tracing::warn;
+
+use crate::aemet::{AemetClient, AemetData, Forecast, Temperature, validate_municipality_id};
+
+#[cfg(test)]
+mod tests;
+
+const AEMET_SOURCE_NAME: &str = "AEMET";
+const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
+const MANAGED_MARKER: &str = ".cielo-generated";
+const MANAGED_MARKER_CONTENT: &str = "cielo-schema=1\n";
+const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
+const SCHEMA_VERSION: u8 = 1;
+const TEMPERATURES_DIRECTORY: &str = "temperatures";
+
+/// Counts from a successfully published snapshot.
+#[derive(Debug)]
+pub(crate) struct GenerationSummary {
+    pub(crate) municipalities: usize,
+    pub(crate) temperature_files: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct Source<'a> {
+    name: &'a str,
+    url: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_at: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct MunicipalitiesDocument<'a> {
+    schema_version: u8,
+    source: Source<'a>,
+    municipalities: &'a [Municipality],
+}
+
+#[derive(Debug, Serialize)]
+struct Municipality {
+    id: String,
+    name: String,
+    province: String,
+    timezone: Timezone,
+}
+
+#[derive(Debug, Serialize)]
+struct TemperatureDocument<'a> {
+    schema_version: u8,
+    source: Source<'a>,
+    municipality_id: &'a str,
+    timezone: Timezone,
+    temperatures: &'a [Temperature],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+enum Timezone {
+    #[serde(rename = "Africa/Ceuta")]
+    AfricaCeuta,
+    #[serde(rename = "Atlantic/Canary")]
+    AtlanticCanary,
+    #[serde(rename = "Europe/Madrid")]
+    EuropeMadrid,
+}
+
+struct Snapshot {
+    municipalities: Vec<Municipality>,
+    forecasts: Vec<Forecast>,
+}
+
+/// Fetch and transactionally publish one complete weather-data snapshot.
+pub(crate) async fn generate(client: &AemetClient, output_dir: &Path) -> Result<GenerationSummary> {
+    // Reject unsafe destinations before making a potentially expensive request.
+    let output_dir = validate_output_directory(output_dir)?;
+    let data = client.fetch().await?;
+    let snapshot = build_snapshot(data)?;
+    let summary = GenerationSummary {
+        municipalities: snapshot.municipalities.len(),
+        temperature_files: snapshot.forecasts.len(),
+    };
+
+    // A complete sibling staging directory keeps readers away from partial data.
+    let staging = write_staging_directory(&output_dir, &snapshot)?;
+    publish_staging_directory(&staging, &output_dir)?;
+
+    Ok(summary)
+}
+
+fn build_snapshot(data: AemetData) -> Result<Snapshot> {
+    let AemetData {
+        municipalities: master_municipalities,
+        mut forecasts,
+    } = data;
+    forecasts.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut forecast_ids = HashSet::with_capacity(forecasts.len());
+    let mut municipalities = Vec::with_capacity(forecasts.len());
+    let mut forecast_only_count = 0_usize;
+
+    for forecast in &forecasts {
+        validate_municipality_id(&forecast.id)?;
+        if !forecast_ids.insert(forecast.id.as_str()) {
+            bail!("duplicate forecast ID: {}", forecast.id);
+        }
+
+        let name = if let Some(master_name) = master_municipalities.get(&forecast.id) {
+            master_name.trim()
+        } else {
+            forecast_only_count += 1;
+            forecast.name.trim()
+        };
+        if name.is_empty() {
+            bail!("municipality {} has an empty name", forecast.id);
+        }
+        let province = normalize_province(&forecast.province);
+        if province.is_empty() {
+            bail!("municipality {} has an empty province", forecast.id);
+        }
+
+        municipalities.push(Municipality {
+            id: forecast.id.clone(),
+            name: name.to_owned(),
+            province: province.to_owned(),
+            timezone: timezone_for(&forecast.id),
+        });
+    }
+
+    let master_only_count = master_municipalities
+        .keys()
+        .filter(|id| !forecast_ids.contains(id.as_str()))
+        .count();
+    if forecast_only_count > 0 || master_only_count > 0 {
+        warn!(
+            forecast_only = forecast_only_count,
+            master_only = master_only_count,
+            "AEMET municipality products contain different ID sets"
+        );
+    }
+
+    Ok(Snapshot {
+        municipalities,
+        forecasts,
+    })
+}
+
+fn write_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<TempDir> {
+    let parent = output_dir
+        .parent()
+        .context("output directory does not have a parent")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create output parent {}", parent.display()))?;
+    let staging = Builder::new()
+        .prefix(".cielo-staging-")
+        .tempdir_in(parent)
+        .with_context(|| format!("failed to create staging directory in {}", parent.display()))?;
+
+    fs::write(staging.path().join(MANAGED_MARKER), MANAGED_MARKER_CONTENT)
+        .context("failed to write generated-directory marker")?;
+    let temperatures_dir = staging.path().join(TEMPERATURES_DIRECTORY);
+    fs::create_dir(&temperatures_dir).context("failed to create temperatures directory")?;
+
+    let municipalities_document = MunicipalitiesDocument {
+        schema_version: SCHEMA_VERSION,
+        source: Source {
+            name: AEMET_SOURCE_NAME,
+            url: AEMET_SOURCE_URL,
+            generated_at: None,
+        },
+        municipalities: &snapshot.municipalities,
+    };
+    write_json(
+        &staging.path().join(MUNICIPALITIES_FILENAME),
+        &municipalities_document,
+    )?;
+
+    for forecast in &snapshot.forecasts {
+        let document = TemperatureDocument {
+            schema_version: SCHEMA_VERSION,
+            source: Source {
+                name: AEMET_SOURCE_NAME,
+                url: AEMET_SOURCE_URL,
+                generated_at: Some(&forecast.generated_at),
+            },
+            municipality_id: &forecast.id,
+            timezone: timezone_for(&forecast.id),
+            temperatures: &forecast.temperatures,
+        };
+        write_json(
+            &temperatures_dir.join(format!("{}.json", forecast.id)),
+            &document,
+        )?;
+    }
+
+    Ok(staging)
+}
+
+fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
+    let file = File::create(path)
+        .with_context(|| format!("failed to create generated file {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, value)
+        .with_context(|| format!("failed to serialize generated file {}", path.display()))?;
+    writer
+        .write_all(b"\n")
+        .with_context(|| format!("failed to finish generated file {}", path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush generated file {}", path.display()))
+}
+
+fn publish_staging_directory(staging: &TempDir, output_dir: &Path) -> Result<()> {
+    // Revalidate after the download so a concurrent path change cannot bypass safety.
+    validate_existing_output(output_dir)?;
+    if !output_dir.exists() {
+        return fs::rename(staging.path(), output_dir).with_context(|| {
+            format!(
+                "failed to publish generated directory {}",
+                output_dir.display()
+            )
+        });
+    }
+
+    let parent = output_dir
+        .parent()
+        .context("output directory does not have a parent")?;
+    let backup = Builder::new()
+        .prefix(".cielo-backup-")
+        .tempdir_in(parent)
+        .with_context(|| format!("failed to create backup directory in {}", parent.display()))?;
+    let previous_snapshot = backup.path().join("snapshot");
+    fs::rename(output_dir, &previous_snapshot).with_context(|| {
+        format!(
+            "failed to move previous generated directory {}",
+            output_dir.display()
+        )
+    })?;
+
+    if let Err(publish_error) = fs::rename(staging.path(), output_dir) {
+        // Restore the prior valid snapshot when the final rename fails.
+        let restore_result = fs::rename(&previous_snapshot, output_dir);
+        return match restore_result {
+            Ok(()) => Err(publish_error).with_context(|| {
+                format!(
+                    "failed to publish generated directory {}; previous snapshot restored",
+                    output_dir.display()
+                )
+            }),
+            Err(restore_error) => {
+                let backup_path = backup.keep();
+                bail!(
+                    "failed to publish generated directory {} ({publish_error}); \
+                     also failed to restore previous snapshot ({restore_error}); \
+                     previous data remains at {}",
+                    output_dir.display(),
+                    backup_path.join("snapshot").display()
+                )
+            }
+        };
+    }
+
+    if let Err(error) = backup.close() {
+        warn!(%error, "failed to remove previous generated snapshot backup");
+    }
+    Ok(())
+}
+
+fn validate_output_directory(path: &Path) -> Result<PathBuf> {
+    if path.as_os_str().is_empty() {
+        bail!("output directory cannot be empty");
+    }
+    if path
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        bail!("output directory cannot contain '..'");
+    }
+
+    let current_dir = env::current_dir().context("failed to determine current directory")?;
+    let absolute = if path.is_absolute() {
+        clean_path(path)
+    } else {
+        clean_path(&current_dir.join(path))
+    };
+    if absolute == clean_path(&current_dir) || absolute.parent().is_none() {
+        bail!("output directory must not be the current directory or filesystem root");
+    }
+    if absolute.file_name().is_none() {
+        bail!("output directory must have a final path component");
+    }
+
+    validate_existing_output(&absolute)?;
+    Ok(absolute)
+}
+
+fn validate_existing_output(path: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect output directory {}", path.display()));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "output directory must not be a symbolic link: {}",
+            path.display()
+        );
+    }
+    if !metadata.is_dir() {
+        bail!("output path is not a directory: {}", path.display());
+    }
+
+    let is_empty = fs::read_dir(path)
+        .with_context(|| format!("failed to read output directory {}", path.display()))?
+        .next()
+        .is_none();
+    if is_empty {
+        return Ok(());
+    }
+
+    let marker_path = path.join(MANAGED_MARKER);
+    let marker_metadata = fs::symlink_metadata(&marker_path).with_context(|| {
+        format!(
+            "refusing to replace non-empty unmanaged directory {}",
+            path.display()
+        )
+    })?;
+    if !marker_metadata.is_file() || marker_metadata.file_type().is_symlink() {
+        bail!("invalid generated-directory marker in {}", path.display());
+    }
+    let marker = fs::read_to_string(&marker_path)
+        .with_context(|| format!("failed to read marker in {}", path.display()))?;
+    if marker != MANAGED_MARKER_CONTENT {
+        bail!(
+            "incompatible generated-directory marker in {}",
+            path.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn clean_path(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| *component != Component::CurDir)
+        .collect()
+}
+
+fn normalize_province(province: &str) -> &str {
+    let province = province.trim();
+    let Some(without_closing_parenthesis) = province.strip_suffix(')') else {
+        return province;
+    };
+    let Some((base, _)) = without_closing_parenthesis.rsplit_once(" (") else {
+        return province;
+    };
+
+    base.trim()
+}
+
+fn timezone_for(municipality_id: &str) -> Timezone {
+    match municipality_id.get(..2) {
+        Some("35" | "38") => Timezone::AtlanticCanary,
+        Some("51" | "52") => Timezone::AfricaCeuta,
+        _ => Timezone::EuropeMadrid,
+    }
+}
