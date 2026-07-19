@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  color: #16212b;
+  background: #f5f7f9;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+}
+
+main,
+footer {
+  width: min(44rem, calc(100% - 2rem));
+  margin-inline: auto;
+}
+
+main {
+  padding-block: 3rem 2rem;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+.site-name {
+  margin: 0 0 0.25rem;
+  color: #45647d;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3rem);
+  line-height: 1.1;
+}
+
+#status {
+  color: #45647d;
+}
+
+#status[role="alert"] {
+  color: #a1261d;
+}
+
+#municipality-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid #d8e0e6;
+  list-style: none;
+}
+
+#municipality-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid #d8e0e6;
+}
+
+.municipality-name {
+  font-weight: 600;
+}
+
+.municipality-province {
+  color: #5d6b77;
+  text-align: right;
+}
+
+footer {
+  padding-block: 0 2rem;
+  font-size: 0.875rem;
+}
+
+a {
+  color: #245d87;
+}
+
+@media (max-width: 30rem) {
+  main {
+    padding-top: 2rem;
+  }
+
+  #municipality-list li {
+    display: block;
+  }
+
+  .municipality-name,
+  .municipality-province {
+    display: block;
+  }
+
+  .municipality-province {
+    margin-top: 0.2rem;
+    text-align: left;
+  }
+}

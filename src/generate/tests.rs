@@ -32,14 +32,15 @@ fn publishes_expected_compact_json_layout() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let output_dir = temporary_root.path().join("site-data");
     let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let staging =
-        write_staging_directory(&output_dir, &snapshot).expect("staging should be written");
+    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Data)
+        .expect("staging should be written");
 
-    publish_staging_directory(&staging, &output_dir).expect("snapshot should publish");
+    publish_staging_directory(&staging, &output_dir, OutputKind::Data)
+        .expect("snapshot should publish");
 
     assert_eq!(
         fs::read_to_string(output_dir.join(MANAGED_MARKER)).expect("marker should be readable"),
-        MANAGED_MARKER_CONTENT
+        DATA_MARKER_CONTENT
     );
     let municipalities_text = fs::read_to_string(output_dir.join(MUNICIPALITIES_FILENAME))
         .expect("municipalities should be readable");
@@ -70,21 +71,119 @@ fn publishes_expected_compact_json_layout() {
 }
 
 #[test]
-fn replaces_managed_snapshot_and_removes_stale_files() {
+fn publishes_complete_static_site() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let output_dir = temporary_root.path().join("site");
+    let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
+    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Site)
+        .expect("staging should be written");
+
+    publish_staging_directory(&staging, &output_dir, OutputKind::Site)
+        .expect("site should publish");
+
+    assert_eq!(
+        fs::read_to_string(output_dir.join(MANAGED_MARKER)).expect("marker should be readable"),
+        SITE_MARKER_CONTENT
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join(DATA_DIRECTORY).join(MANAGED_MARKER))
+            .expect("data marker should be readable"),
+        DATA_MARKER_CONTENT
+    );
+    assert!(
+        fs::read_to_string(output_dir.join("index.html"))
+            .expect("index should be readable")
+            .contains("<html lang=\"es\">")
+    );
+    assert!(output_dir.join("assets/site.css").is_file());
+    assert!(
+        fs::read_to_string(output_dir.join("assets/site.js"))
+            .expect("script should be readable")
+            .contains("./data/municipalities.json")
+    );
+    assert!(output_dir.join("data/temperatures/35001.json").is_file());
+}
+
+#[test]
+fn data_refresh_preserves_site_assets_and_removes_stale_data() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let site_dir = temporary_root.path().join("site");
+    let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
+    let site_staging = write_staging_directory(&site_dir, &snapshot, OutputKind::Site)
+        .expect("site staging should be written");
+    publish_staging_directory(&site_staging, &site_dir, OutputKind::Site)
+        .expect("site should publish");
+    let original_index =
+        fs::read_to_string(site_dir.join("index.html")).expect("index should be readable");
+    let data_dir = site_dir.join(DATA_DIRECTORY);
+    fs::write(data_dir.join("stale.json"), "old").expect("stale data should be written");
+
+    let data_staging = write_staging_directory(&data_dir, &snapshot, OutputKind::Data)
+        .expect("data staging should be written");
+    publish_staging_directory(&data_staging, &data_dir, OutputKind::Data)
+        .expect("data should publish");
+
+    assert!(!data_dir.join("stale.json").exists());
+    assert!(data_dir.join(MUNICIPALITIES_FILENAME).is_file());
+    assert_eq!(
+        fs::read_to_string(site_dir.join("index.html")).expect("index should remain readable"),
+        original_index
+    );
+    assert_eq!(
+        fs::read_to_string(site_dir.join(MANAGED_MARKER)).expect("site marker should be readable"),
+        SITE_MARKER_CONTENT
+    );
+}
+
+#[test]
+fn upgrades_legacy_data_snapshot_and_removes_stale_files() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let output_dir = temporary_root.path().join("site-data");
     fs::create_dir(&output_dir).expect("old output should be created");
-    fs::write(output_dir.join(MANAGED_MARKER), MANAGED_MARKER_CONTENT)
+    fs::write(output_dir.join(MANAGED_MARKER), LEGACY_DATA_MARKER_CONTENT)
         .expect("old marker should be written");
     fs::write(output_dir.join("stale.json"), "old").expect("stale file should be written");
     let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let staging =
-        write_staging_directory(&output_dir, &snapshot).expect("staging should be written");
+    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Data)
+        .expect("staging should be written");
 
-    publish_staging_directory(&staging, &output_dir).expect("snapshot should publish");
+    publish_staging_directory(&staging, &output_dir, OutputKind::Data)
+        .expect("snapshot should publish");
 
     assert!(!output_dir.join("stale.json").exists());
     assert!(output_dir.join(MUNICIPALITIES_FILENAME).is_file());
+    assert_eq!(
+        fs::read_to_string(output_dir.join(MANAGED_MARKER)).expect("marker should be readable"),
+        DATA_MARKER_CONTENT
+    );
+}
+
+#[test]
+fn refuses_to_replace_a_different_output_kind() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let site_dir = temporary_root.path().join("site");
+    let data_dir = temporary_root.path().join("data");
+    let legacy_dir = temporary_root.path().join("legacy");
+    for directory in [&site_dir, &data_dir, &legacy_dir] {
+        fs::create_dir(directory).expect("output should be created");
+    }
+    fs::write(site_dir.join(MANAGED_MARKER), SITE_MARKER_CONTENT)
+        .expect("site marker should be written");
+    fs::write(data_dir.join(MANAGED_MARKER), DATA_MARKER_CONTENT)
+        .expect("data marker should be written");
+    fs::write(legacy_dir.join(MANAGED_MARKER), LEGACY_DATA_MARKER_CONTENT)
+        .expect("legacy marker should be written");
+
+    let data_error = validate_output_directory(&site_dir, OutputKind::Data)
+        .expect_err("site output should not be replaced with data");
+    let site_error = validate_output_directory(&data_dir, OutputKind::Site)
+        .expect_err("data output should not be replaced with a site");
+    let legacy_error = validate_output_directory(&legacy_dir, OutputKind::Site)
+        .expect_err("legacy data output should not be replaced with a site");
+
+    assert!(data_error.to_string().contains("not managed as data"));
+    assert!(site_error.to_string().contains("not managed as site"));
+    assert!(legacy_error.to_string().contains("not managed as site"));
 }
 
 #[test]
@@ -94,8 +193,8 @@ fn refuses_nonempty_unmanaged_output() {
     fs::create_dir(&output_dir).expect("output should be created");
     fs::write(output_dir.join("keep.txt"), "important").expect("unmanaged file should be written");
 
-    let error =
-        validate_output_directory(&output_dir).expect_err("unmanaged output should be refused");
+    let error = validate_output_directory(&output_dir, OutputKind::Data)
+        .expect_err("unmanaged output should be refused");
 
     assert!(error.to_string().contains("unmanaged directory"));
     assert_eq!(
@@ -106,12 +205,13 @@ fn refuses_nonempty_unmanaged_output() {
 
 #[test]
 fn refuses_parent_traversal_and_current_directory() {
-    let traversal_error = validate_output_directory(Path::new("data/../elsewhere"))
-        .expect_err("parent traversal should be refused");
+    let traversal_error =
+        validate_output_directory(Path::new("data/../elsewhere"), OutputKind::Data)
+            .expect_err("parent traversal should be refused");
     assert!(traversal_error.to_string().contains("cannot contain '..'"));
 
-    let current_error =
-        validate_output_directory(Path::new(".")).expect_err("current directory should fail");
+    let current_error = validate_output_directory(Path::new("."), OutputKind::Data)
+        .expect_err("current directory should fail");
     assert!(current_error.to_string().contains("current directory"));
 }
 
@@ -126,8 +226,8 @@ fn refuses_symbolic_link_output() {
     fs::create_dir(&real_dir).expect("real directory should be created");
     symlink(&real_dir, &output_dir).expect("symbolic link should be created");
 
-    let error =
-        validate_output_directory(&output_dir).expect_err("symbolic link output should be refused");
+    let error = validate_output_directory(&output_dir, OutputKind::Data)
+        .expect_err("symbolic link output should be refused");
 
     assert!(error.to_string().contains("symbolic link"));
 }

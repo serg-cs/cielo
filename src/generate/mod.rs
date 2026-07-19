@@ -18,11 +18,46 @@ mod tests;
 
 const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
+const ASSETS_DIRECTORY: &str = "assets";
+const DATA_DIRECTORY: &str = "data";
+const DATA_MARKER_CONTENT: &str = "cielo-output=data\ncielo-schema=1\n";
+const INDEX_HTML: &str = include_str!("../../site/index.html");
+const LEGACY_DATA_MARKER_CONTENT: &str = "cielo-schema=1\n";
 const MANAGED_MARKER: &str = ".cielo-generated";
-const MANAGED_MARKER_CONTENT: &str = "cielo-schema=1\n";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
 const SCHEMA_VERSION: u8 = 1;
+const SITE_CSS: &str = include_str!("../../site/assets/site.css");
+const SITE_JS: &str = include_str!("../../site/assets/site.js");
+const SITE_MARKER_CONTENT: &str = "cielo-output=site\ncielo-schema=1\n";
 const TEMPERATURES_DIRECTORY: &str = "temperatures";
+
+/// Kind of generated artifact to publish.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OutputKind {
+    Site,
+    Data,
+}
+
+impl OutputKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Site => "site",
+            Self::Data => "data",
+        }
+    }
+
+    const fn marker_content(self) -> &'static str {
+        match self {
+            Self::Site => SITE_MARKER_CONTENT,
+            Self::Data => DATA_MARKER_CONTENT,
+        }
+    }
+
+    fn accepts_marker(self, marker: &str) -> bool {
+        marker == self.marker_content()
+            || self == Self::Data && marker == LEGACY_DATA_MARKER_CONTENT
+    }
+}
 
 /// Counts from a successfully published snapshot.
 #[derive(Debug)]
@@ -78,10 +113,14 @@ struct Snapshot {
     forecasts: Vec<Forecast>,
 }
 
-/// Fetch and transactionally publish one complete weather-data snapshot.
-pub(crate) async fn generate(client: &AemetClient, output_dir: &Path) -> Result<GenerationSummary> {
+/// Fetch and transactionally publish one complete generated artifact.
+pub(crate) async fn generate(
+    client: &AemetClient,
+    output_dir: &Path,
+    output_kind: OutputKind,
+) -> Result<GenerationSummary> {
     // Reject unsafe destinations before making a potentially expensive request.
-    let output_dir = validate_output_directory(output_dir)?;
+    let output_dir = validate_output_directory(output_dir, output_kind)?;
     let data = client.fetch().await?;
     let snapshot = build_snapshot(data)?;
     let summary = GenerationSummary {
@@ -90,8 +129,8 @@ pub(crate) async fn generate(client: &AemetClient, output_dir: &Path) -> Result<
     };
 
     // A complete sibling staging directory keeps readers away from partial data.
-    let staging = write_staging_directory(&output_dir, &snapshot)?;
-    publish_staging_directory(&staging, &output_dir)?;
+    let staging = write_staging_directory(&output_dir, &snapshot, output_kind)?;
+    publish_staging_directory(&staging, &output_dir, output_kind)?;
 
     Ok(summary)
 }
@@ -153,7 +192,11 @@ fn build_snapshot(data: AemetData) -> Result<Snapshot> {
     })
 }
 
-fn write_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<TempDir> {
+fn write_staging_directory(
+    output_dir: &Path,
+    snapshot: &Snapshot,
+    output_kind: OutputKind,
+) -> Result<TempDir> {
     let parent = output_dir
         .parent()
         .context("output directory does not have a parent")?;
@@ -164,9 +207,42 @@ fn write_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<Tem
         .tempdir_in(parent)
         .with_context(|| format!("failed to create staging directory in {}", parent.display()))?;
 
-    fs::write(staging.path().join(MANAGED_MARKER), MANAGED_MARKER_CONTENT)
-        .context("failed to write generated-directory marker")?;
-    let temperatures_dir = staging.path().join(TEMPERATURES_DIRECTORY);
+    write_managed_marker(staging.path(), output_kind)?;
+    match output_kind {
+        OutputKind::Site => {
+            write_site_assets(staging.path())?;
+            let data_dir = staging.path().join(DATA_DIRECTORY);
+            fs::create_dir(&data_dir).context("failed to create site data directory")?;
+            write_managed_marker(&data_dir, OutputKind::Data)?;
+            write_data_files(&data_dir, snapshot)?;
+        }
+        OutputKind::Data => write_data_files(staging.path(), snapshot)?,
+    }
+
+    Ok(staging)
+}
+
+fn write_managed_marker(output_dir: &Path, output_kind: OutputKind) -> Result<()> {
+    fs::write(
+        output_dir.join(MANAGED_MARKER),
+        output_kind.marker_content(),
+    )
+    .context("failed to write generated-directory marker")
+}
+
+fn write_site_assets(output_dir: &Path) -> Result<()> {
+    // Keep the generated artifact independent from the source checkout.
+    fs::write(output_dir.join("index.html"), INDEX_HTML)
+        .context("failed to write generated index.html")?;
+    let assets_dir = output_dir.join(ASSETS_DIRECTORY);
+    fs::create_dir(&assets_dir).context("failed to create site assets directory")?;
+    fs::write(assets_dir.join("site.css"), SITE_CSS)
+        .context("failed to write generated site.css")?;
+    fs::write(assets_dir.join("site.js"), SITE_JS).context("failed to write generated site.js")
+}
+
+fn write_data_files(output_dir: &Path, snapshot: &Snapshot) -> Result<()> {
+    let temperatures_dir = output_dir.join(TEMPERATURES_DIRECTORY);
     fs::create_dir(&temperatures_dir).context("failed to create temperatures directory")?;
 
     let municipalities_document = MunicipalitiesDocument {
@@ -179,7 +255,7 @@ fn write_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<Tem
         municipalities: &snapshot.municipalities,
     };
     write_json(
-        &staging.path().join(MUNICIPALITIES_FILENAME),
+        &output_dir.join(MUNICIPALITIES_FILENAME),
         &municipalities_document,
     )?;
 
@@ -201,7 +277,7 @@ fn write_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<Tem
         )?;
     }
 
-    Ok(staging)
+    Ok(())
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -218,9 +294,13 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .with_context(|| format!("failed to flush generated file {}", path.display()))
 }
 
-fn publish_staging_directory(staging: &TempDir, output_dir: &Path) -> Result<()> {
+fn publish_staging_directory(
+    staging: &TempDir,
+    output_dir: &Path,
+    output_kind: OutputKind,
+) -> Result<()> {
     // Revalidate after the download so a concurrent path change cannot bypass safety.
-    validate_existing_output(output_dir)?;
+    validate_existing_output(output_dir, output_kind)?;
     if !output_dir.exists() {
         return fs::rename(staging.path(), output_dir).with_context(|| {
             format!(
@@ -274,7 +354,7 @@ fn publish_staging_directory(staging: &TempDir, output_dir: &Path) -> Result<()>
     Ok(())
 }
 
-fn validate_output_directory(path: &Path) -> Result<PathBuf> {
+fn validate_output_directory(path: &Path, output_kind: OutputKind) -> Result<PathBuf> {
     if path.as_os_str().is_empty() {
         bail!("output directory cannot be empty");
     }
@@ -298,11 +378,11 @@ fn validate_output_directory(path: &Path) -> Result<PathBuf> {
         bail!("output directory must have a final path component");
     }
 
-    validate_existing_output(&absolute)?;
+    validate_existing_output(&absolute, output_kind)?;
     Ok(absolute)
 }
 
-fn validate_existing_output(path: &Path) -> Result<()> {
+fn validate_existing_output(path: &Path, output_kind: OutputKind) -> Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -341,10 +421,11 @@ fn validate_existing_output(path: &Path) -> Result<()> {
     }
     let marker = fs::read_to_string(&marker_path)
         .with_context(|| format!("failed to read marker in {}", path.display()))?;
-    if marker != MANAGED_MARKER_CONTENT {
+    if !output_kind.accepts_marker(&marker) {
         bail!(
-            "incompatible generated-directory marker in {}",
-            path.display()
+            "generated directory {} is not managed as {} output",
+            path.display(),
+            output_kind.as_str()
         );
     }
 
