@@ -2,7 +2,8 @@
 <html lang="es">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f4efe6">
     <meta name="description" content="Municipios con predicción meteorológica de AEMET">
     <title>Cielo</title>
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
@@ -10,43 +11,7 @@
     <script type="module" src="./assets/site.js"></script>
   </head>
   <body>
-    <main>
-      <header>
-        <p class="site-name">Cielo</p>
-        <div class="header-row">
-          <h1>Mis municipios</h1>
-          <button id="search-button" type="button" disabled>Buscar municipio</button>
-        </div>
-      </header>
-
-      <p id="status" role="status">Cargando municipios…</p>
-      <p id="empty-state" hidden>
-        Todavía no sigues ningún municipio. Busca uno para empezar.
-      </p>
-      <ul id="municipality-list" aria-label="Municipios seguidos" hidden></ul>
-
-      <dialog id="search-dialog" aria-labelledby="search-title">
-        <div class="dialog-content">
-          <div class="dialog-header">
-            <h2 id="search-title">Buscar municipio</h2>
-            <button id="close-search" class="secondary-button" type="button">Cerrar</button>
-          </div>
-
-          <label for="municipality-search">Nombre del municipio</label>
-          <input
-            id="municipality-search"
-            type="search"
-            name="municipality"
-            autocomplete="off"
-            autofocus
-            placeholder="Por ejemplo, Ávila"
-          >
-          <p id="search-status" role="status">Escribe al menos 2 caracteres.</p>
-          <ul id="search-results" aria-label="Resultados de búsqueda"></ul>
-        </div>
-      </dialog>
-
-      <noscript>Esta página necesita JavaScript para cargar los municipios.</noscript>
-    </main>
+    <cielo-app></cielo-app>
+    <noscript>Esta página necesita JavaScript para cargar los municipios.</noscript>
   </body>
 </html>

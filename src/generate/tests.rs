@@ -93,14 +93,49 @@ fn publishes_complete_static_site() {
     let index =
         fs::read_to_string(output_dir.join("index.html")).expect("index should be readable");
     assert!(index.contains("<html lang=\"es\">"));
-    assert!(index.contains("Mis municipios"));
-    assert!(index.contains("<dialog id=\"search-dialog\""));
+    assert!(index.contains("<cielo-app></cielo-app>"));
+    assert!(index.contains("viewport-fit=cover"));
+    assert!(index.contains("name=\"theme-color\""));
+    assert!(index.contains("type=\"module\" src=\"./assets/site.js\""));
     assert!(output_dir.join("icon.svg").is_file());
     assert!(output_dir.join("assets/site.css").is_file());
     let script =
         fs::read_to_string(output_dir.join("assets/site.js")).expect("script should be readable");
-    assert!(script.contains("./data/municipalities.json"));
-    assert!(script.contains("cielo.trackedMunicipalities"));
+    assert!(script.contains("./components/cielo-icon.js"));
+    assert!(script.contains("./components/cielo-app.js"));
+
+    // Recursive embedding must include every dependency of the module entrypoint.
+    let app = fs::read_to_string(output_dir.join("assets/components/cielo-app.js"))
+        .expect("app component should be readable");
+    assert!(app.contains("customElements.define(\"cielo-app\""));
+    assert!(app.contains("./data/municipalities.json"));
+    for module in [
+        "assets/components/cielo-icon.js",
+        "assets/components/cielo-locations-view.js",
+        "assets/components/cielo-municipality-row.js",
+        "assets/components/cielo-municipality-view.js",
+        "assets/lib/catalog.js",
+        "assets/lib/storage.js",
+    ] {
+        assert!(output_dir.join(module).is_file(), "missing module {module}");
+    }
+    let storage = fs::read_to_string(output_dir.join("assets/lib/storage.js"))
+        .expect("storage library should be readable");
+    assert!(storage.contains("cielo.trackedMunicipalities"));
+    assert!(storage.contains("cielo.lastMunicipality"));
+    for icon in [
+        "circle-x.svg",
+        "list.svg",
+        "map-pin.svg",
+        "search.svg",
+        "trash-2.svg",
+    ] {
+        assert!(
+            output_dir.join("assets/icons").join(icon).is_file(),
+            "missing icon {icon}"
+        );
+    }
+    assert!(output_dir.join("assets/icons/LICENSE").is_file());
     assert!(output_dir.join("data/temperatures/35001.json").is_file());
 }
 

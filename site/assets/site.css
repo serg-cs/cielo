@@ -1,50 +1,46 @@
 :root {
   color-scheme: light;
-  font-family: system-ui, sans-serif;
-  color: #16212b;
-  background: #f5f7f9;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  color: #1c1915;
+  background: #f4efe6;
+  font-synthesis: none;
+  --cielo-color-border: rgb(28 25 21 / 18%);
+  --cielo-color-destructive: #e6545e;
+  --cielo-color-focus: #1746b3;
+  --cielo-color-locations-background: #f4efe6;
+  --cielo-color-municipality-background: #f4efe6;
+  --cielo-color-muted: #5f584f;
+  --cielo-color-text: #1c1915;
+  --cielo-content-width: 38rem;
+  --cielo-focus-outline: 0.18rem solid var(--cielo-color-focus);
+  --cielo-font-size-small: 0.875rem;
+  --cielo-font-size-title: 1.05rem;
+  --cielo-radius-control: 1.25rem;
+  --cielo-radius-pill: 99rem;
+  --cielo-row-height: 4.1rem;
+  --cielo-space-1: 0.25rem;
+  --cielo-space-2: 0.5rem;
+  --cielo-space-3: 0.75rem;
+  --cielo-space-4: 1rem;
+  --cielo-touch-target: 3rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
 }
 
 body {
+  min-width: 20rem;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
-}
-
-main {
-  width: min(44rem, calc(100% - 2rem));
-  margin-inline: auto;
-  padding-block: 3rem 2rem;
-}
-
-header {
-  margin-bottom: 2rem;
-}
-
-.header-row {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.site-name {
-  margin: 0 0 0.25rem;
-  color: #45647d;
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-h1 {
-  margin: 0;
-  font-size: clamp(2rem, 6vw, 3rem);
-  line-height: 1.1;
-}
-
-h2 {
-  margin: 0;
-  font-size: 1.35rem;
+  overflow: hidden;
+  background: var(--cielo-color-locations-background);
 }
 
 button,
@@ -52,159 +48,21 @@ input {
   font: inherit;
 }
 
-button {
-  min-height: 2.75rem;
-  padding: 0.55rem 0.9rem;
-  border: 1px solid #245d87;
-  border-radius: 0.4rem;
-  color: #fff;
-  background: #245d87;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #194766;
-}
-
-button:disabled {
-  border-color: #aab7c1;
-  color: #4f5d68;
-  background: #dfe5e9;
-  cursor: default;
-}
-
-#status {
-  color: #45647d;
-}
-
-#status[role="alert"] {
-  color: #a1261d;
-}
-
-#empty-state {
-  margin: 0;
-  padding-block: 1rem;
-  border-block: 1px solid #d8e0e6;
-  color: #5d6b77;
-}
-
-#municipality-list,
-#search-results {
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid #d8e0e6;
-  list-style: none;
-}
-
-#municipality-list li,
-#search-results li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-block: 0.75rem;
-  border-bottom: 1px solid #d8e0e6;
-}
-
-.municipality-summary {
-  min-width: 0;
-}
-
-.municipality-name {
+cielo-app {
   display: block;
-  font-weight: 600;
-}
-
-.municipality-province {
-  display: block;
-  margin-top: 0.15rem;
-  color: #5d6b77;
-  font-size: 0.875rem;
-}
-
-.remove-button,
-.secondary-button {
-  border-color: #b8c4cc;
-  color: #245d87;
-  background: transparent;
-}
-
-.remove-button:hover,
-.secondary-button:hover {
-  background: #e9eef2;
-}
-
-dialog {
-  width: min(32rem, calc(100% - 2rem));
-  max-height: min(38rem, calc(100vh - 2rem));
-  padding: 0;
-  border: 1px solid #c5d0d8;
-  border-radius: 0.75rem;
-  color: inherit;
-  background: #fff;
-  box-shadow: 0 1rem 3rem rgb(22 33 43 / 20%);
-}
-
-dialog::backdrop {
-  background: rgb(22 33 43 / 35%);
-}
-
-.dialog-content {
-  padding: 1.25rem;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-label {
-  display: block;
-  margin-bottom: 0.4rem;
-  font-weight: 600;
-}
-
-input[type="search"] {
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid #9eacb7;
-  border-radius: 0.4rem;
-  color: inherit;
-  background: #fff;
+  height: 100vh;
+  height: 100dvh;
 }
 
-#search-status {
-  min-height: 1.25rem;
-  margin-block: 0.75rem;
-  color: #5d6b77;
-  font-size: 0.875rem;
-}
-
-#search-results {
-  max-height: 22rem;
-  overflow-y: auto;
-}
-
-@media (max-width: 30rem) {
-  main {
-    padding-top: 2rem;
-  }
-
-  .header-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  #search-button {
-    width: 100%;
-  }
-
-  dialog {
-    width: calc(100% - 1rem);
-    max-height: calc(100vh - 1rem);
-  }
+noscript {
+  position: fixed;
+  z-index: 50;
+  inset: auto 1rem calc(1rem + env(safe-area-inset-bottom));
+  padding: 0.8rem 1rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 0.9rem;
+  color: #fff;
+  background: rgb(105 28 39 / 92%);
+  text-align: center;
 }
