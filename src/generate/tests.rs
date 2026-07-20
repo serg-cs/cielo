@@ -90,17 +90,16 @@ fn publishes_complete_static_site() {
             .expect("data marker should be readable"),
         DATA_MARKER_CONTENT
     );
-    assert!(
-        fs::read_to_string(output_dir.join("index.html"))
-            .expect("index should be readable")
-            .contains("<html lang=\"es\">")
-    );
+    let index =
+        fs::read_to_string(output_dir.join("index.html")).expect("index should be readable");
+    assert!(index.contains("<html lang=\"es\">"));
+    assert!(index.contains("Mis municipios"));
+    assert!(index.contains("<dialog id=\"search-dialog\""));
     assert!(output_dir.join("assets/site.css").is_file());
-    assert!(
-        fs::read_to_string(output_dir.join("assets/site.js"))
-            .expect("script should be readable")
-            .contains("./data/municipalities.json")
-    );
+    let script =
+        fs::read_to_string(output_dir.join("assets/site.js")).expect("script should be readable");
+    assert!(script.contains("./data/municipalities.json"));
+    assert!(script.contains("cielo.trackedMunicipalities"));
     assert!(output_dir.join("data/temperatures/35001.json").is_file());
 }
 

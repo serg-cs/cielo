@@ -10,18 +10,21 @@ body {
   margin: 0;
 }
 
-main,
-footer {
+main {
   width: min(44rem, calc(100% - 2rem));
   margin-inline: auto;
-}
-
-main {
   padding-block: 3rem 2rem;
 }
 
 header {
   margin-bottom: 2rem;
+}
+
+.header-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .site-name {
@@ -39,6 +42,37 @@ h1 {
   line-height: 1.1;
 }
 
+h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid #245d87;
+  border-radius: 0.4rem;
+  color: #fff;
+  background: #245d87;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #194766;
+}
+
+button:disabled {
+  border-color: #aab7c1;
+  color: #4f5d68;
+  background: #dfe5e9;
+  cursor: default;
+}
+
 #status {
   color: #45647d;
 }
@@ -47,37 +81,112 @@ h1 {
   color: #a1261d;
 }
 
-#municipality-list {
+#empty-state {
+  margin: 0;
+  padding-block: 1rem;
+  border-block: 1px solid #d8e0e6;
+  color: #5d6b77;
+}
+
+#municipality-list,
+#search-results {
   margin: 0;
   padding: 0;
   border-top: 1px solid #d8e0e6;
   list-style: none;
 }
 
-#municipality-list li {
+#municipality-list li,
+#search-results li {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding-block: 0.75rem;
   border-bottom: 1px solid #d8e0e6;
 }
 
+.municipality-summary {
+  min-width: 0;
+}
+
 .municipality-name {
+  display: block;
   font-weight: 600;
 }
 
 .municipality-province {
+  display: block;
+  margin-top: 0.15rem;
   color: #5d6b77;
-  text-align: right;
-}
-
-footer {
-  padding-block: 0 2rem;
   font-size: 0.875rem;
 }
 
-a {
+.remove-button,
+.secondary-button {
+  border-color: #b8c4cc;
   color: #245d87;
+  background: transparent;
+}
+
+.remove-button:hover,
+.secondary-button:hover {
+  background: #e9eef2;
+}
+
+dialog {
+  width: min(32rem, calc(100% - 2rem));
+  max-height: min(38rem, calc(100vh - 2rem));
+  padding: 0;
+  border: 1px solid #c5d0d8;
+  border-radius: 0.75rem;
+  color: inherit;
+  background: #fff;
+  box-shadow: 0 1rem 3rem rgb(22 33 43 / 20%);
+}
+
+dialog::backdrop {
+  background: rgb(22 33 43 / 35%);
+}
+
+.dialog-content {
+  padding: 1.25rem;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+input[type="search"] {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #9eacb7;
+  border-radius: 0.4rem;
+  color: inherit;
+  background: #fff;
+}
+
+#search-status {
+  min-height: 1.25rem;
+  margin-block: 0.75rem;
+  color: #5d6b77;
+  font-size: 0.875rem;
+}
+
+#search-results {
+  max-height: 22rem;
+  overflow-y: auto;
 }
 
 @media (max-width: 30rem) {
@@ -85,17 +194,17 @@ a {
     padding-top: 2rem;
   }
 
-  #municipality-list li {
-    display: block;
+  .header-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .municipality-name,
-  .municipality-province {
-    display: block;
+  #search-button {
+    width: 100%;
   }
 
-  .municipality-province {
-    margin-top: 0.2rem;
-    text-align: left;
+  dialog {
+    width: calc(100% - 1rem);
+    max-height: calc(100vh - 1rem);
   }
 }
