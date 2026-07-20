@@ -95,6 +95,7 @@ fn publishes_complete_static_site() {
     assert!(index.contains("<html lang=\"es\">"));
     assert!(index.contains("Mis municipios"));
     assert!(index.contains("<dialog id=\"search-dialog\""));
+    assert!(output_dir.join("icon.svg").is_file());
     assert!(output_dir.join("assets/site.css").is_file());
     let script =
         fs::read_to_string(output_dir.join("assets/site.js")).expect("script should be readable");

@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use include_dir::{Dir, include_dir};
 use serde::Serialize;
 use tempfile::{Builder, TempDir};
 use tracing::warn;
@@ -18,18 +19,16 @@ mod tests;
 
 const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
-const ASSETS_DIRECTORY: &str = "assets";
 const DATA_DIRECTORY: &str = "data";
 const DATA_MARKER_CONTENT: &str = "cielo-output=data\ncielo-schema=1\n";
-const INDEX_HTML: &str = include_str!("../../site/index.html");
 const LEGACY_DATA_MARKER_CONTENT: &str = "cielo-schema=1\n";
 const MANAGED_MARKER: &str = ".cielo-generated";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
 const SCHEMA_VERSION: u8 = 1;
-const SITE_CSS: &str = include_str!("../../site/assets/site.css");
-const SITE_JS: &str = include_str!("../../site/assets/site.js");
 const SITE_MARKER_CONTENT: &str = "cielo-output=site\ncielo-schema=1\n";
 const TEMPERATURES_DIRECTORY: &str = "temperatures";
+
+static SITE_DIRECTORY: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/site");
 
 /// Kind of generated artifact to publish.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -232,13 +231,9 @@ fn write_managed_marker(output_dir: &Path, output_kind: OutputKind) -> Result<()
 
 fn write_site_assets(output_dir: &Path) -> Result<()> {
     // Keep the generated artifact independent from the source checkout.
-    fs::write(output_dir.join("index.html"), INDEX_HTML)
-        .context("failed to write generated index.html")?;
-    let assets_dir = output_dir.join(ASSETS_DIRECTORY);
-    fs::create_dir(&assets_dir).context("failed to create site assets directory")?;
-    fs::write(assets_dir.join("site.css"), SITE_CSS)
-        .context("failed to write generated site.css")?;
-    fs::write(assets_dir.join("site.js"), SITE_JS).context("failed to write generated site.js")
+    SITE_DIRECTORY
+        .extract(output_dir)
+        .context("failed to write embedded site assets")
 }
 
 fn write_data_files(output_dir: &Path, snapshot: &Snapshot) -> Result<()> {
