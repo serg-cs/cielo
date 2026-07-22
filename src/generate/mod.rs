@@ -153,12 +153,13 @@ fn build_snapshot(data: AemetData) -> Result<Snapshot> {
             bail!("duplicate forecast ID: {}", forecast.id);
         }
 
-        let name = if let Some(master_name) = master_municipalities.get(&forecast.id) {
+        let source_name = if let Some(master_name) = master_municipalities.get(&forecast.id) {
             master_name.trim()
         } else {
             forecast_only_count += 1;
             forecast.name.trim()
         };
+        let name = normalize_municipality_name(source_name);
         if name.is_empty() {
             bail!("municipality {} has an empty name", forecast.id);
         }
@@ -169,7 +170,7 @@ fn build_snapshot(data: AemetData) -> Result<Snapshot> {
 
         municipalities.push(Municipality {
             id: forecast.id.clone(),
-            name: name.to_owned(),
+            name,
             province: province.to_owned(),
             timezone: timezone_for(&forecast.id),
         });
@@ -534,14 +535,70 @@ fn clean_path(path: &Path) -> PathBuf {
 
 fn normalize_province(province: &str) -> &str {
     let province = province.trim();
-    let Some(without_closing_parenthesis) = province.strip_suffix(')') else {
-        return province;
-    };
-    let Some((base, _)) = without_closing_parenthesis.rsplit_once(" (") else {
-        return province;
+    let province = if let Some(base) = province
+        .strip_suffix(')')
+        .and_then(|value| value.rsplit_once(" (").map(|(base, _)| base.trim()))
+    {
+        base
+    } else {
+        province
     };
 
-    base.trim()
+    province
+        .rsplit_once('/')
+        .map_or(province, |(_, spanish_name)| spanish_name.trim())
+}
+
+fn normalize_municipality_name(name: &str) -> String {
+    name.trim()
+        .split('/')
+        .map(normalize_deferred_article)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn normalize_deferred_article(name: &str) -> String {
+    let name = name.trim();
+    let Some((base, article)) = name.rsplit_once(',') else {
+        return name.to_owned();
+    };
+    let base = base.trim();
+    let article = article.trim();
+    if base.is_empty() || !is_deferred_article(article) {
+        return name.to_owned();
+    }
+
+    if article.ends_with('\'') || article.ends_with('’') {
+        format!("{article}{base}")
+    } else {
+        format!("{article} {base}")
+    }
+}
+
+fn is_deferred_article(value: &str) -> bool {
+    matches!(
+        value,
+        "A" | "As"
+            | "El"
+            | "Els"
+            | "Es"
+            | "L'"
+            | "L’"
+            | "La"
+            | "Las"
+            | "Les"
+            | "Los"
+            | "O"
+            | "Os"
+            | "Sa"
+            | "Ses"
+            | "el"
+            | "els"
+            | "l'"
+            | "l’"
+            | "la"
+            | "les"
+    )
 }
 
 fn timezone_for(municipality_id: &str) -> Timezone {

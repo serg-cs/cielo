@@ -28,6 +28,51 @@ fn builds_municipalities_from_forecast_ids_with_master_name_overlay() {
 }
 
 #[test]
+fn normalizes_location_names_for_publication() {
+    let mut data = sample_data();
+    data.municipalities
+        .insert("35001".to_owned(), "Arco, El".to_owned());
+    data.forecasts[0].province = "Alacant/Alicante".to_owned();
+
+    let snapshot = build_snapshot(data).expect("snapshot should build");
+
+    assert_eq!(snapshot.municipalities[0].name, "El Arco");
+    assert_eq!(snapshot.municipalities[0].province, "Alicante");
+}
+
+#[test]
+fn reorders_only_recognized_deferred_articles() {
+    for (source, expected) in [
+        ("Arco, El", "El Arco"),
+        ("Alcúdia, l'", "l'Alcúdia"),
+        ("Cañiza, A", "A Cañiza"),
+        (
+            "Camp de Mirra, el/Campo de Mirra",
+            "el Camp de Mirra/Campo de Mirra",
+        ),
+        ("Saus, Camallera i Llampaies", "Saus, Camallera i Llampaies"),
+        (
+            "Cruïlles, Monells i Sant Sadurní de l'Heura",
+            "Cruïlles, Monells i Sant Sadurní de l'Heura",
+        ),
+    ] {
+        assert_eq!(normalize_municipality_name(source), expected);
+    }
+}
+
+#[test]
+fn normalizes_aemet_province_qualifiers_and_bilingual_names() {
+    for (source, expected) in [
+        ("Las Palmas (Gran Canaria)", "Las Palmas"),
+        ("Araba/Álava", "Álava"),
+        ("València/Valencia", "Valencia"),
+        (" Madrid ", "Madrid"),
+    ] {
+        assert_eq!(normalize_province(source), expected);
+    }
+}
+
+#[test]
 fn publishes_expected_compact_json_layout() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let output_dir = temporary_root.path().join("site-data");
