@@ -1,9 +1,23 @@
 const iconUrls = new Map(
   [
     "circle-x",
+    "cloud",
+    "cloud-drizzle",
+    "cloud-fog",
+    "cloud-lightning",
+    "cloud-moon",
+    "cloud-moon-rain",
+    "cloud-rain",
+    "cloud-snow",
+    "cloud-sun",
+    "cloud-sun-rain",
+    "cloudy",
     "list",
     "map-pin",
+    "moon",
     "search",
+    "snowflake",
+    "sun",
     "trash-2",
   ].map((name) => [
     name,

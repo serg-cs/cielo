@@ -9,11 +9,12 @@ import {
 } from "./cielo-municipality-row.js";
 
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
+/** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 
 export class CieloLocationsView extends HTMLElement {
   #catalog = [];
   #trackedIds = new Set();
-  #temperatures = new Map();
+  #currentForecasts = new Map();
   #ready = false;
   #searchActive = false;
 
@@ -98,12 +99,12 @@ export class CieloLocationsView extends HTMLElement {
     }
   }
 
-  /** @param {string} municipalityId @param {number | null} celsius */
-  setTemperature(municipalityId, celsius) {
-    if (celsius === null) {
-      this.#temperatures.delete(municipalityId);
+  /** @param {string} municipalityId @param {CurrentForecast | null} forecast */
+  setCurrentForecast(municipalityId, forecast) {
+    if (forecast === null) {
+      this.#currentForecasts.delete(municipalityId);
     } else {
-      this.#temperatures.set(municipalityId, celsius);
+      this.#currentForecasts.set(municipalityId, forecast);
     }
 
     // Update existing rows in place so live weather does not disturb interaction state.
@@ -114,7 +115,7 @@ export class CieloLocationsView extends HTMLElement {
         row instanceof CieloMunicipalityRow &&
         row.municipality?.id === municipalityId
       ) {
-        row.temperature = celsius;
+        row.currentForecast = forecast;
       }
     }
   }
@@ -571,7 +572,7 @@ export class CieloLocationsView extends HTMLElement {
     row.mode = mode;
     row.tracked = this.#trackedIds.has(municipality.id);
     row.municipality = municipality;
-    row.temperature = this.#temperatures.get(municipality.id) ?? null;
+    row.currentForecast = this.#currentForecasts.get(municipality.id) ?? null;
     if (mode === "saved") {
       row.dataset.saved = "";
     }

@@ -61,6 +61,7 @@ fn publishes_expected_compact_json_layout() {
         &fs::read_to_string(temperature_path).expect("temperatures should be readable"),
     )
     .expect("temperatures should be JSON");
+    assert_eq!(temperatures["schema_version"], 1);
     assert_eq!(
         temperatures["source"]["generated_at"],
         "2026-07-19T08:00:00"
@@ -68,6 +69,11 @@ fn publishes_expected_compact_json_layout() {
     assert_eq!(temperatures["municipality_id"], "35001");
     assert_eq!(temperatures["temperatures"][0]["hour"], 10);
     assert_eq!(temperatures["temperatures"][0]["celsius"], 24);
+    assert_eq!(temperatures["temperatures"][0]["state"], "cloud-sun");
+    assert_eq!(
+        temperatures["temperatures"][0]["description"],
+        "Intervalos nubosos"
+    );
 }
 
 #[test]
@@ -106,6 +112,7 @@ fn publishes_complete_static_site() {
     assert!(script.contains("serviceWorker.register"));
     let service_worker = fs::read_to_string(output_dir.join("service-worker.js"))
         .expect("service worker should be readable");
+    assert!(service_worker.contains("shell-v1"));
     assert!(service_worker.contains("cache: \"no-cache\""));
     assert!(service_worker.contains("./data/municipalities.json"));
 
@@ -129,16 +136,40 @@ fn publishes_complete_static_site() {
         .expect("storage library should be readable");
     assert!(storage.contains("cielo.trackedMunicipalities"));
     assert!(storage.contains("cielo.lastMunicipality"));
+    let icon_component = fs::read_to_string(output_dir.join("assets/components/cielo-icon.js"))
+        .expect("icon component should be readable");
     for icon in [
         "circle-x.svg",
+        "cloud-drizzle.svg",
+        "cloud-fog.svg",
+        "cloud-lightning.svg",
+        "cloud-moon-rain.svg",
+        "cloud-moon.svg",
+        "cloud-rain.svg",
+        "cloud-snow.svg",
+        "cloud-sun-rain.svg",
+        "cloud-sun.svg",
+        "cloud.svg",
+        "cloudy.svg",
         "list.svg",
         "map-pin.svg",
+        "moon.svg",
         "search.svg",
+        "snowflake.svg",
+        "sun.svg",
         "trash-2.svg",
     ] {
         assert!(
             output_dir.join("assets/icons").join(icon).is_file(),
             "missing icon {icon}"
+        );
+        assert!(
+            service_worker.contains(&format!("./assets/icons/{icon}")),
+            "icon is not precached: {icon}"
+        );
+        assert!(
+            icon_component.contains(&format!("\"{}\"", icon.trim_end_matches(".svg"))),
+            "icon is not registered: {icon}"
         );
     }
     assert!(output_dir.join("assets/icons/LICENSE").is_file());
@@ -295,6 +326,8 @@ fn forecast(id: &str, name: &str, province: &str, celsius: i16) -> Forecast {
             date: "2026-07-19".to_owned(),
             hour: 10,
             celsius,
+            state: crate::aemet::SkyState::CloudSun,
+            description: "Intervalos nubosos".to_owned(),
         }],
     }
 }

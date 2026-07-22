@@ -8,12 +8,13 @@ const rowOpenVelocity = -0.45;
  * A municipality record supplied through the `municipality` property.
  * @typedef {import("../lib/catalog.js").Municipality} Municipality
  */
+/** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 
 export class CieloMunicipalityRow extends HTMLElement {
   #municipality = null;
   #mode = "saved";
   #tracked = false;
-  #temperature = null;
+  #currentForecast = null;
   #gesture = {
     pointerId: null,
     startX: 0,
@@ -59,10 +60,10 @@ export class CieloMunicipalityRow extends HTMLElement {
     this.#render();
   }
 
-  /** @param {number | null} value */
-  set temperature(value) {
-    this.#temperature = value;
-    this.#renderTemperature();
+  /** @param {CurrentForecast | null} value */
+  set currentForecast(value) {
+    this.#currentForecast = value;
+    this.#renderCurrentForecast();
   }
 
   get actionOpen() {
@@ -362,9 +363,25 @@ export class CieloMunicipalityRow extends HTMLElement {
           overflow: hidden;
         }
 
+        .current-forecast {
+          display: flex;
+          flex: 0 0 auto;
+          align-items: center;
+          gap: var(--cielo-space-2);
+          margin-left: var(--cielo-space-3);
+        }
+
+        .condition-icon {
+          width: 1.7rem;
+          height: 1.7rem;
+        }
+
+        .condition-icon[hidden] {
+          display: none;
+        }
+
         .temperature {
           flex: 0 0 auto;
-          margin-left: var(--cielo-space-3);
           font-size: clamp(1.65rem, 7vw, 2rem);
           font-variant-numeric: tabular-nums;
           font-weight: 540;
@@ -462,7 +479,14 @@ export class CieloMunicipalityRow extends HTMLElement {
             <span class="name"></span>
             <span class="province"></span>
           </span>
-          ${isSavedRow ? '<span class="temperature" aria-hidden="true">—</span>' : ""}
+          ${
+            isSavedRow
+              ? `<span class="current-forecast" aria-hidden="true">
+                  <span class="temperature">—</span>
+                  <cielo-icon class="condition-icon" hidden></cielo-icon>
+                </span>`
+              : ""
+          }
         </button>
         ${
           isSavedRow
@@ -480,17 +504,29 @@ export class CieloMunicipalityRow extends HTMLElement {
       name.textContent = municipality.name;
       province.textContent = municipality.province;
     }
-    this.#renderTemperature();
+    this.#renderCurrentForecast();
   }
 
-  #renderTemperature() {
+  #renderCurrentForecast() {
     if (this.shadowRoot === null || this.#municipality === null) {
       return;
     }
 
+    const conditionIcon = this.shadowRoot.querySelector(".condition-icon");
+    if (conditionIcon instanceof HTMLElement) {
+      conditionIcon.hidden = this.#currentForecast === null;
+      if (this.#currentForecast === null) {
+        conditionIcon.removeAttribute("name");
+      } else {
+        conditionIcon.setAttribute("name", this.#currentForecast.state);
+      }
+    }
+
     const temperature = this.shadowRoot.querySelector(".temperature");
     if (temperature !== null) {
-      temperature.textContent = formatTemperature(this.#temperature);
+      temperature.textContent = formatTemperature(
+        this.#currentForecast?.celsius ?? null,
+      );
     }
     this.shadowRoot
       .querySelector(".open-button")
@@ -506,11 +542,11 @@ export class CieloMunicipalityRow extends HTMLElement {
     const action = this.#tracked
       ? `Abrir ${municipality.name}, ${municipality.province}`
       : `Guardar y abrir ${municipality.name}, ${municipality.province}`;
-    if (this.#mode !== "saved" || this.#temperature === null) {
+    if (this.#mode !== "saved" || this.#currentForecast === null) {
       return action;
     }
 
-    return `${action}. Temperatura actual: ${this.#temperature} grados Celsius`;
+    return `${action}. Temperatura actual: ${this.#currentForecast.celsius} grados Celsius`;
   }
 }
 

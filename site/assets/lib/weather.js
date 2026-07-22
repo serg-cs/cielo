@@ -3,28 +3,51 @@ const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
 const temperatureMinimum = -32_768;
 const temperatureMaximum = 32_767;
+const supportedSkyStates = new Set([
+  "cloud",
+  "cloud-drizzle",
+  "cloud-fog",
+  "cloud-lightning",
+  "cloud-moon",
+  "cloud-moon-rain",
+  "cloud-rain",
+  "cloud-snow",
+  "cloud-sun",
+  "cloud-sun-rain",
+  "cloudy",
+  "moon",
+  "snowflake",
+  "sun",
+]);
 
 /** @typedef {import("./catalog.js").Municipality} Municipality */
 
 /**
- * @typedef {object} TemperatureForecast
- * @property {string} municipalityId
- * @property {string} timezone
- * @property {Map<string, number>} temperaturesByHour
+ * @typedef {object} CurrentForecast
+ * @property {number} celsius
+ * @property {string} state
+ * @property {string} description
  */
 
 /**
- * @typedef {object} TemperatureChangeDetail
+ * @typedef {object} HourlyForecast
  * @property {string} municipalityId
- * @property {number | null} celsius
+ * @property {string} timezone
+ * @property {Map<string, CurrentForecast>} forecastsByHour
+ */
+
+/**
+ * @typedef {object} CurrentForecastChangeDetail
+ * @property {string} municipalityId
+ * @property {CurrentForecast | null} forecast
  */
 
 /**
  * @param {unknown} document
  * @param {Municipality} municipality
- * @returns {TemperatureForecast}
+ * @returns {HourlyForecast}
  */
-export function validateTemperatureDocument(document, municipality) {
+export function validateForecastDocument(document, municipality) {
   if (
     typeof document !== "object" ||
     document === null ||
@@ -42,41 +65,45 @@ export function validateTemperatureDocument(document, municipality) {
   }
 
   // Index exact local hours while rejecting ambiguous forecast documents.
-  const temperaturesByHour = new Map();
-  for (const temperature of document.temperatures) {
-    if (!isTemperature(temperature)) {
+  const forecastsByHour = new Map();
+  for (const hourlyForecast of document.temperatures) {
+    if (!isHourlyForecast(hourlyForecast)) {
       throw new Error("El documento de temperaturas no es válido");
     }
 
-    const key = temperatureKey(temperature.date, temperature.hour);
-    if (temperaturesByHour.has(key)) {
+    const key = forecastKey(hourlyForecast.date, hourlyForecast.hour);
+    if (forecastsByHour.has(key)) {
       throw new Error("El documento de temperaturas contiene horas duplicadas");
     }
-    temperaturesByHour.set(key, temperature.celsius);
+    forecastsByHour.set(key, {
+      celsius: hourlyForecast.celsius,
+      state: hourlyForecast.state,
+      description: hourlyForecast.description,
+    });
   }
 
   return {
     municipalityId: municipality.id,
     timezone: municipality.timezone,
-    temperaturesByHour,
+    forecastsByHour,
   };
 }
 
 /**
- * @param {TemperatureForecast} forecast
+ * @param {HourlyForecast} forecast
  * @param {Date} [now]
- * @returns {number | null}
+ * @returns {CurrentForecast | null}
  */
-export function selectCurrentTemperature(forecast, now = new Date()) {
-  const key = currentTemperatureKey(now, forecast.timezone);
-  return forecast.temperaturesByHour.get(key) ?? null;
+export function selectCurrentForecast(forecast, now = new Date()) {
+  const key = currentForecastKey(now, forecast.timezone);
+  return forecast.forecastsByHour.get(key) ?? null;
 }
 
-export class CurrentTemperatureStore extends EventTarget {
+export class CurrentForecastStore extends EventTarget {
   #catalogById = new Map();
   #trackedIds = new Set();
   #forecasts = new Map();
-  #temperatures = new Map();
+  #currentForecasts = new Map();
   #inFlight = new Map();
   #fetcher;
   #now;
@@ -116,7 +143,7 @@ export class CurrentTemperatureStore extends EventTarget {
     }
 
     // Recompute immediately before starting the recurring refresh cycles.
-    this.#recomputeTemperatures();
+    this.#recomputeCurrentForecasts();
     void this.refreshNow();
     this.#scheduleRefresh();
     this.#scheduleHourBoundary();
@@ -151,20 +178,20 @@ export class CurrentTemperatureStore extends EventTarget {
     for (const id of this.#trackedIds) {
       if (!nextIds.has(id)) {
         this.#forecasts.delete(id);
-        this.#publishTemperature(id, null);
+        this.#publishCurrentForecast(id, null);
       }
     }
     this.#trackedIds = nextIds;
-    this.#recomputeTemperatures();
+    this.#recomputeCurrentForecasts();
 
     if (this.#running && addedIds.length > 0) {
       void this.#refreshIds(addedIds);
     }
   }
 
-  /** @param {string} municipalityId @returns {number | null} */
-  getCurrentTemperature(municipalityId) {
-    return this.#temperatures.get(municipalityId) ?? null;
+  /** @param {string} municipalityId @returns {CurrentForecast | null} */
+  getCurrentForecast(municipalityId) {
+    return this.#currentForecasts.get(municipalityId) ?? null;
   }
 
   async refreshNow() {
@@ -220,7 +247,7 @@ export class CurrentTemperatureStore extends EventTarget {
       );
     }
 
-    const forecast = validateTemperatureDocument(
+    const forecast = validateForecastDocument(
       await response.json(),
       municipality,
     );
@@ -229,40 +256,43 @@ export class CurrentTemperatureStore extends EventTarget {
     }
 
     this.#forecasts.set(municipality.id, forecast);
-    this.#publishTemperature(
+    this.#publishCurrentForecast(
       municipality.id,
-      selectCurrentTemperature(forecast, this.#now()),
+      selectCurrentForecast(forecast, this.#now()),
     );
   }
 
-  #recomputeTemperatures() {
+  #recomputeCurrentForecasts() {
     for (const municipalityId of this.#trackedIds) {
       const forecast = this.#forecasts.get(municipalityId);
       if (forecast !== undefined) {
-        this.#publishTemperature(
+        this.#publishCurrentForecast(
           municipalityId,
-          selectCurrentTemperature(forecast, this.#now()),
+          selectCurrentForecast(forecast, this.#now()),
         );
       }
     }
   }
 
-  /** @param {string} municipalityId @param {number | null} celsius */
-  #publishTemperature(municipalityId, celsius) {
-    const hasPrevious = this.#temperatures.has(municipalityId);
-    const previous = this.#temperatures.get(municipalityId) ?? null;
-    if ((!hasPrevious && celsius === null) || previous === celsius) {
+  /** @param {string} municipalityId @param {CurrentForecast | null} forecast */
+  #publishCurrentForecast(municipalityId, forecast) {
+    const hasPrevious = this.#currentForecasts.has(municipalityId);
+    const previous = this.#currentForecasts.get(municipalityId) ?? null;
+    if (
+      (!hasPrevious && forecast === null) ||
+      currentForecastsAreEqual(previous, forecast)
+    ) {
       return;
     }
 
-    if (celsius === null) {
-      this.#temperatures.delete(municipalityId);
+    if (forecast === null) {
+      this.#currentForecasts.delete(municipalityId);
     } else {
-      this.#temperatures.set(municipalityId, celsius);
+      this.#currentForecasts.set(municipalityId, forecast);
     }
     this.dispatchEvent(
-      new CustomEvent("temperaturechange", {
-        detail: { municipalityId, celsius },
+      new CustomEvent("currentforecastchange", {
+        detail: { municipalityId, forecast },
       }),
     );
   }
@@ -297,7 +327,7 @@ export class CurrentTemperatureStore extends EventTarget {
       hourMilliseconds - (now.getTime() % hourMilliseconds);
     this.#hourTimeoutId = window.setTimeout(() => {
       this.#hourTimeoutId = null;
-      this.#recomputeTemperatures();
+      this.#recomputeCurrentForecasts();
       void this.refreshNow();
       this.#scheduleHourBoundary();
     }, millisecondsUntilNextHour + 50);
@@ -315,13 +345,13 @@ export class CurrentTemperatureStore extends EventTarget {
   }
 
   #handleOnline = () => {
-    this.#recomputeTemperatures();
+    this.#recomputeCurrentForecasts();
     void this.refreshNow();
   };
 
   #handleVisibilityChange = () => {
     if (document.visibilityState === "visible") {
-      this.#recomputeTemperatures();
+      this.#recomputeCurrentForecasts();
       void this.refreshNow();
       this.#scheduleRefresh();
       this.#scheduleHourBoundary();
@@ -342,7 +372,7 @@ export class CurrentTemperatureStore extends EventTarget {
 }
 
 /** @param {unknown} value */
-function isTemperature(value) {
+function isHourlyForecast(value) {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -356,7 +386,13 @@ function isTemperature(value) {
     "celsius" in value &&
     Number.isInteger(value.celsius) &&
     value.celsius >= temperatureMinimum &&
-    value.celsius <= temperatureMaximum
+    value.celsius <= temperatureMaximum &&
+    "state" in value &&
+    typeof value.state === "string" &&
+    supportedSkyStates.has(value.state) &&
+    "description" in value &&
+    typeof value.description === "string" &&
+    value.description.trim().length > 0
   );
 }
 
@@ -392,7 +428,7 @@ function maximumDayOfMonth(year, month) {
 }
 
 /** @param {Date} now @param {string} timezone */
-function currentTemperatureKey(now, timezone) {
+function currentForecastKey(now, timezone) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
@@ -408,6 +444,19 @@ function currentTemperatureKey(now, timezone) {
 }
 
 /** @param {string} date @param {number} hour */
-function temperatureKey(date, hour) {
+function forecastKey(date, hour) {
   return `${date}:${String(hour).padStart(2, "0")}`;
+}
+
+/**
+ * @param {CurrentForecast | null} left
+ * @param {CurrentForecast | null} right
+ */
+function currentForecastsAreEqual(left, right) {
+  return left === right ||
+    left !== null &&
+      right !== null &&
+      left.celsius === right.celsius &&
+      left.state === right.state &&
+      left.description === right.description;
 }

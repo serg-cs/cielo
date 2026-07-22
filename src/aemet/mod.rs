@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::{Cursor, Read},
     time::{Duration, SystemTime},
 };
@@ -65,6 +65,66 @@ pub(crate) struct Temperature {
     pub(crate) date: String,
     pub(crate) hour: u8,
     pub(crate) celsius: i16,
+    pub(crate) state: SkyState,
+    pub(crate) description: String,
+}
+
+/// Supported visual state for one AEMET sky condition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) enum SkyState {
+    #[serde(rename = "cloud")]
+    Cloud,
+    #[serde(rename = "cloud-drizzle")]
+    CloudDrizzle,
+    #[serde(rename = "cloud-fog")]
+    CloudFog,
+    #[serde(rename = "cloud-lightning")]
+    CloudLightning,
+    #[serde(rename = "cloud-moon")]
+    CloudMoon,
+    #[serde(rename = "cloud-moon-rain")]
+    CloudMoonRain,
+    #[serde(rename = "cloud-rain")]
+    CloudRain,
+    #[serde(rename = "cloud-snow")]
+    CloudSnow,
+    #[serde(rename = "cloud-sun")]
+    CloudSun,
+    #[serde(rename = "cloud-sun-rain")]
+    CloudSunRain,
+    #[serde(rename = "cloudy")]
+    Cloudy,
+    #[serde(rename = "moon")]
+    Moon,
+    #[serde(rename = "snowflake")]
+    Snowflake,
+    #[serde(rename = "sun")]
+    Sun,
+}
+
+impl SkyState {
+    fn from_aemet_code(code: &str) -> Option<Self> {
+        match code {
+            "14" => Some(Self::Cloud),
+            "44" | "45" | "45n" | "46" | "46n" => Some(Self::CloudDrizzle),
+            "81" | "81n" | "82" | "82n" | "83" | "83n" => Some(Self::CloudFog),
+            "51" | "51n" | "52" | "52n" | "53" | "53n" | "54" | "54n" | "61" | "61n" | "62"
+            | "62n" | "63" | "63n" | "64" | "64n" => Some(Self::CloudLightning),
+            "13n" | "14n" | "17n" => Some(Self::CloudMoon),
+            "23n" | "25n" | "26n" | "43n" | "44n" => Some(Self::CloudMoonRain),
+            "24" | "24n" | "25" | "26" => Some(Self::CloudRain),
+            "35n" | "36n" | "71" | "71n" | "72" | "72n" | "73" | "73n" | "74" | "74n" => {
+                Some(Self::CloudSnow)
+            }
+            "13" | "17" => Some(Self::CloudSun),
+            "23" | "43" => Some(Self::CloudSunRain),
+            "15" | "15n" | "16" | "16n" => Some(Self::Cloudy),
+            "11n" | "12n" => Some(Self::Moon),
+            "33" | "33n" | "34" | "34n" | "35" | "36" => Some(Self::Snowflake),
+            "11" | "12" => Some(Self::Sun),
+            _ => None,
+        }
+    }
 }
 
 /// HTTP adapter for AEMET's two-step `OpenData` protocol.
@@ -331,6 +391,8 @@ struct Prediction {
 struct ForecastDay {
     #[serde(rename = "fecha")]
     date: String,
+    #[serde(default, rename = "estado_cielo")]
+    sky_states: Vec<ForecastSkyState>,
     #[serde(
         default,
         rename = "temperatura",
@@ -345,6 +407,21 @@ struct ForecastTemperature {
     hour: String,
     #[serde(rename = "valor")]
     celsius: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ForecastSkyState {
+    #[serde(rename = "periodo")]
+    hour: String,
+    #[serde(rename = "valor")]
+    code: String,
+    #[serde(rename = "descripcion")]
+    description: String,
+}
+
+struct NormalizedSkyState {
+    state: SkyState,
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,12 +472,14 @@ fn parse_forecast_archive(bytes: &[u8]) -> Result<Vec<Forecast>> {
     let mut archive = tar::Archive::new(decoder);
     let mut forecasts = Vec::new();
     let mut ids = HashSet::new();
+    let mut archive_entries = 0_usize;
     let mut total_size = 0_u64;
 
     for entry in archive.entries().context("invalid tar archive")? {
-        if forecasts.len() >= MAX_FORECASTS {
+        if archive_entries >= MAX_FORECASTS {
             bail!("forecast archive contains too many entries");
         }
+        archive_entries += 1;
         let mut entry = entry.context("invalid tar archive entry")?;
         if !entry.header().entry_type().is_file() {
             bail!("forecast archive contains a non-file entry");
@@ -434,20 +513,25 @@ fn parse_forecast_archive(bytes: &[u8]) -> Result<Vec<Forecast>> {
             .with_context(|| format!("invalid forecast JSON in {path}"))?;
         let forecast = normalize_forecast(document.root, &filename_id)?;
 
-        if !ids.insert(forecast.id.clone()) {
-            bail!("duplicate forecast ID in archive: {}", forecast.id);
+        if !ids.insert(filename_id.clone()) {
+            bail!("duplicate forecast ID in archive: {filename_id}");
         }
-        forecasts.push(forecast);
+        if let Some(forecast) = forecast {
+            forecasts.push(forecast);
+        }
     }
 
-    if forecasts.is_empty() {
+    if archive_entries == 0 {
         bail!("forecast archive is empty");
+    }
+    if forecasts.is_empty() {
+        bail!("forecast archive does not contain any forecasts with sky conditions");
     }
 
     Ok(forecasts)
 }
 
-fn normalize_forecast(root: ForecastRoot, filename_id: &str) -> Result<Forecast> {
+fn normalize_forecast(root: ForecastRoot, filename_id: &str) -> Result<Option<Forecast>> {
     validate_municipality_id(&root.id)?;
     if root.id != filename_id {
         bail!(
@@ -459,9 +543,41 @@ fn normalize_forecast(root: ForecastRoot, filename_id: &str) -> Result<Forecast>
         bail!("forecast {} has an empty generation time", root.id);
     }
 
-    let mut temperatures = Vec::new();
+    // Normalize conditions independently so source array order cannot affect joins.
+    let mut sky_states = BTreeMap::new();
+    let mut temperature_values = Vec::new();
     for day in root.prediction.days {
         validate_date(&day.date)?;
+        for value in day.sky_states {
+            let hour = value
+                .hour
+                .parse::<u8>()
+                .with_context(|| format!("invalid condition hour in forecast {}", root.id))?;
+            if hour > 23 {
+                bail!("invalid condition hour in forecast {}: {hour}", root.id);
+            }
+
+            let code = value.code.trim();
+            if code.is_empty() {
+                bail!("empty condition code in forecast {}", root.id);
+            }
+            let state = SkyState::from_aemet_code(code).with_context(|| {
+                format!("unknown condition code in forecast {}: {code}", root.id)
+            })?;
+            let description = repair_iso_8859_15_mojibake(value.description.trim());
+            if description.is_empty() {
+                bail!("empty condition description in forecast {}", root.id);
+            }
+
+            let key = (day.date.clone(), hour);
+            if sky_states
+                .insert(key, NormalizedSkyState { state, description })
+                .is_some()
+            {
+                bail!("forecast {} contains duplicate condition hours", root.id);
+            }
+        }
+
         for value in day.temperatures {
             let hour = value
                 .hour
@@ -474,32 +590,71 @@ fn normalize_forecast(root: ForecastRoot, filename_id: &str) -> Result<Forecast>
                 .celsius
                 .parse::<i16>()
                 .with_context(|| format!("invalid temperature in forecast {}", root.id))?;
-            temperatures.push(Temperature {
-                date: day.date.clone(),
-                hour,
-                celsius,
-            });
+            temperature_values.push((day.date.clone(), hour, celsius));
         }
     }
-    if temperatures.is_empty() {
+    if sky_states.is_empty() {
+        warn!(
+            municipality_id = %root.id,
+            municipality_name = %root.name,
+            "excluding AEMET forecast without sky conditions"
+        );
+        return Ok(None);
+    }
+    if temperature_values.is_empty() {
         bail!("forecast {} does not contain temperatures", root.id);
     }
 
-    temperatures.sort_by(|left, right| (&left.date, left.hour).cmp(&(&right.date, right.hour)));
-    if temperatures
+    temperature_values.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
+    if temperature_values
         .windows(2)
-        .any(|pair| pair[0].date == pair[1].date && pair[0].hour == pair[1].hour)
+        .any(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1)
     {
         bail!("forecast {} contains duplicate temperature hours", root.id);
     }
 
-    Ok(Forecast {
+    // Prefer exact or earlier conditions, falling forward only before the first state.
+    let mut temperatures = Vec::with_capacity(temperature_values.len());
+    for (date, hour, celsius) in temperature_values {
+        let key = (date.clone(), hour);
+        let sky_state = sky_state_at_or_near(&sky_states, &key)
+            .context("forecast condition index unexpectedly became empty")?;
+        temperatures.push(Temperature {
+            date,
+            hour,
+            celsius,
+            state: sky_state.state,
+            description: sky_state.description.clone(),
+        });
+    }
+
+    Ok(Some(Forecast {
         id: root.id,
         name: repair_iso_8859_15_mojibake(&root.name),
         province: repair_iso_8859_15_mojibake(&root.province),
         generated_at: root.generated_at,
         temperatures,
-    })
+    }))
+}
+
+fn sky_state_at_or_near<'a>(
+    sky_states: &'a BTreeMap<(String, u8), NormalizedSkyState>,
+    key: &(String, u8),
+) -> Option<&'a NormalizedSkyState> {
+    sky_states
+        .get(key)
+        .or_else(|| {
+            sky_states
+                .range(..key.clone())
+                .next_back()
+                .map(|(_, state)| state)
+        })
+        .or_else(|| {
+            sky_states
+                .range(key.clone()..)
+                .next()
+                .map(|(_, state)| state)
+        })
 }
 
 fn forecast_id_from_filename(path: &str) -> Result<String> {

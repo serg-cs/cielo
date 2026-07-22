@@ -4,10 +4,11 @@ const screenDismissDistance = 96;
 const screenDismissVelocity = 0.5;
 
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
+/** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 
 export class CieloMunicipalityView extends HTMLElement {
   #municipality = null;
-  #temperature = null;
+  #currentForecast = null;
   #hiding = false;
   #edgeDismiss = false;
   #transitionToken = 0;
@@ -44,8 +45,8 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#cancelPendingTransition();
   }
 
-  /** @param {Municipality} municipality @param {number | null} temperature */
-  show(municipality, temperature) {
+  /** @param {Municipality} municipality @param {CurrentForecast | null} currentForecast */
+  show(municipality, currentForecast) {
     const screen = this.#screen;
     const title = this.#title;
     const titleText = this.#titleText;
@@ -56,7 +57,7 @@ export class CieloMunicipalityView extends HTMLElement {
     // Replace any superseded edge transition before showing the next screen.
     this.#cancelPendingTransition();
     this.#municipality = municipality;
-    this.#temperature = temperature;
+    this.#currentForecast = currentForecast;
     this.#hiding = false;
     this.#edgeDismiss = false;
     this.#transitionToken += 1;
@@ -65,7 +66,7 @@ export class CieloMunicipalityView extends HTMLElement {
       "aria-label",
       `Cambiar ubicación. Ubicación actual: ${municipality.name}, ${municipality.province}`,
     );
-    this.#renderTemperature();
+    this.#renderCurrentForecast();
     this.hidden = false;
     screen.dataset.dragging = "false";
     screen.dataset.edgeDismiss = "false";
@@ -130,7 +131,7 @@ export class CieloMunicipalityView extends HTMLElement {
 
     this.hidden = true;
     this.#municipality = null;
-    this.#temperature = null;
+    this.#currentForecast = null;
     this.#hiding = false;
     screen.style.setProperty("--screen-offset-x", "0px");
     screen.dataset.edgeDismiss = "false";
@@ -144,14 +145,14 @@ export class CieloMunicipalityView extends HTMLElement {
     );
   }
 
-  /** @param {string} municipalityId @param {number | null} temperature */
-  setTemperature(municipalityId, temperature) {
+  /** @param {string} municipalityId @param {CurrentForecast | null} currentForecast */
+  setCurrentForecast(municipalityId, currentForecast) {
     if (this.#municipality?.id !== municipalityId) {
       return;
     }
 
-    this.#temperature = temperature;
-    this.#renderTemperature();
+    this.#currentForecast = currentForecast;
+    this.#renderCurrentForecast();
   }
 
   /** @param {{edgeSwipe?: boolean}} [options] */
@@ -315,21 +316,41 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#screen?.focus({ preventScroll: true });
   }
 
-  #renderTemperature() {
+  #renderCurrentForecast() {
+    const conditionIcon = this.shadowRoot?.querySelector(
+      "#current-condition-icon",
+    );
     const value = this.shadowRoot?.querySelector("#current-temperature-value");
+    const description = this.shadowRoot?.querySelector(
+      "#current-condition-description",
+    );
     const announcement = this.shadowRoot?.querySelector(
       "#current-temperature-announcement",
     );
-    if (!(value instanceof HTMLElement) || !(announcement instanceof HTMLElement)) {
+    if (
+      !(conditionIcon instanceof HTMLElement) ||
+      !(value instanceof HTMLElement) ||
+      !(description instanceof HTMLElement) ||
+      !(announcement instanceof HTMLElement)
+    ) {
       return;
     }
 
-    value.textContent = this.#temperature === null
+    conditionIcon.hidden = this.#currentForecast === null;
+    description.hidden = this.#currentForecast === null;
+    if (this.#currentForecast === null) {
+      conditionIcon.removeAttribute("name");
+      description.textContent = "";
+    } else {
+      conditionIcon.setAttribute("name", this.#currentForecast.state);
+      description.textContent = this.#currentForecast.description;
+    }
+    value.textContent = this.#currentForecast === null
       ? "—"
-      : `${this.#temperature}°`;
-    announcement.textContent = this.#temperature === null
+      : `${this.#currentForecast.celsius}°`;
+    announcement.textContent = this.#currentForecast === null
       ? "Temperatura actual no disponible"
-      : `Temperatura actual: ${this.#temperature} grados Celsius`;
+      : `Temperatura actual: ${this.#currentForecast.celsius} grados Celsius`;
   }
 
   #cancelPendingTransition() {
@@ -512,13 +533,52 @@ export class CieloMunicipalityView extends HTMLElement {
           overflow-wrap: anywhere;
         }
 
-        .current-temperature {
-          margin: 0.55rem 0 0 0.9rem;
+        .current-forecast {
+          width: 100%;
+          margin-top: 0.55rem;
+        }
+
+        .current-reading {
+          display: flex;
+          align-items: center;
+        }
+
+        .current-condition-icon {
+          width: clamp(4.5rem, 18vw, 6.5rem);
+          height: clamp(4.5rem, 18vw, 6.5rem);
+          margin-left: auto;
+          margin-right: 0.9rem;
+        }
+
+        .current-condition-icon[hidden] {
+          display: none;
+        }
+
+        #current-temperature-value {
+          flex: 0 0 auto;
+          margin-left: 0.9rem;
           font-size: clamp(6rem, 30vw, 10rem);
           font-variant-numeric: tabular-nums;
           font-weight: 300;
           letter-spacing: -0.075em;
           line-height: 0.9;
+        }
+
+        .current-condition-description {
+          display: block;
+          /* Follow a two-digit reading until the desktop text cap takes over. */
+          max-width: min(18rem, 41.5vw, calc(100% - 1.8rem));
+          margin: 0.65rem 0 0 0.9rem;
+          color: var(--cielo-color-muted);
+          font-size: clamp(0.95rem, 3.5vw, 1.125rem);
+          font-weight: 350;
+          letter-spacing: 0.005em;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
+        }
+
+        .current-condition-description[hidden] {
+          display: none;
         }
 
         @media (min-width: 48rem) {
@@ -560,12 +620,24 @@ export class CieloMunicipalityView extends HTMLElement {
               </button>
             </h1>
           </div>
-          <p class="current-temperature" role="status" aria-live="polite" aria-atomic="true">
-            <span id="current-temperature-value" aria-hidden="true">—</span>
+          <div class="current-forecast" role="status" aria-live="polite" aria-atomic="true">
+            <span class="current-reading" aria-hidden="true">
+              <span id="current-temperature-value">—</span>
+              <cielo-icon
+                id="current-condition-icon"
+                class="current-condition-icon"
+                hidden
+              ></cielo-icon>
+            </span>
+            <span
+              id="current-condition-description"
+              class="current-condition-description"
+              hidden
+            ></span>
             <span id="current-temperature-announcement" class="visually-hidden">
               Temperatura actual no disponible
             </span>
-          </p>
+          </div>
           <p id="municipality-instructions" class="visually-hidden">
             Pulsa la lista o el nombre para elegir otra ubicación. También puedes deslizar hacia la derecha desde el borde izquierdo o usar Atrás.
           </p>

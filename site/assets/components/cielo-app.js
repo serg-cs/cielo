@@ -9,7 +9,7 @@ import {
   saveTrackedMunicipalityIds,
 } from "../lib/storage.js";
 import {
-  CurrentTemperatureStore,
+  CurrentForecastStore,
 } from "../lib/weather.js";
 import {
   CieloLocationsView,
@@ -32,9 +32,9 @@ const navigationStateKey = "cielo";
  */
 
 /**
- * @typedef {object} TemperatureChangeDetail
+ * @typedef {object} CurrentForecastChangeDetail
  * @property {string} municipalityId
- * @property {number | null} celsius
+ * @property {import("../lib/weather.js").CurrentForecast | null} forecast
  */
 
 /**
@@ -48,7 +48,7 @@ export class CieloApp extends HTMLElement {
   #selectedId = null;
   #lastOpenedId = null;
   #initialized = false;
-  #temperatures = new CurrentTemperatureStore();
+  #currentForecasts = new CurrentForecastStore();
 
   constructor() {
     super();
@@ -60,7 +60,7 @@ export class CieloApp extends HTMLElement {
     window.addEventListener("popstate", this.#handlePopState);
     if (this.#initialized) {
       if (this.#municipalities.length > 0) {
-        this.#temperatures.start(this.#municipalities, this.#trackedIds);
+        this.#currentForecasts.start(this.#municipalities, this.#trackedIds);
       }
       return;
     }
@@ -72,7 +72,7 @@ export class CieloApp extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("popstate", this.#handlePopState);
-    this.#temperatures.stop();
+    this.#currentForecasts.stop();
   }
 
   /** @returns {CieloLocationsView | null} */
@@ -116,9 +116,9 @@ export class CieloApp extends HTMLElement {
         /** @type {MunicipalityIdentityDetail} */ (event.detail).municipalityId,
       );
     });
-    this.#temperatures.addEventListener(
-      "temperaturechange",
-      this.#handleTemperatureChange,
+    this.#currentForecasts.addEventListener(
+      "currentforecastchange",
+      this.#handleCurrentForecastChange,
     );
   }
 
@@ -162,7 +162,7 @@ export class CieloApp extends HTMLElement {
       locationsView.trackedIds = this.#trackedIds;
       locationsView.showReady();
       if (this.isConnected) {
-        this.#temperatures.start(this.#municipalities, this.#trackedIds);
+        this.#currentForecasts.start(this.#municipalities, this.#trackedIds);
       }
       this.dataset.ready = "true";
       this.#initializeNavigation();
@@ -211,7 +211,7 @@ export class CieloApp extends HTMLElement {
     if (shouldTrack) {
       this.#trackedIds.add(municipalityId);
       saveTrackedMunicipalityIds(this.#trackedIds);
-      this.#temperatures.setTrackedIds(this.#trackedIds);
+      this.#currentForecasts.setTrackedIds(this.#trackedIds);
     }
 
     const locationsView = this.#locationsView;
@@ -242,7 +242,7 @@ export class CieloApp extends HTMLElement {
     this.#setThemeColor("--cielo-color-municipality-background");
     municipalityView.show(
       municipality,
-      this.#temperatures.getCurrentTemperature(municipalityId),
+      this.#currentForecasts.getCurrentForecast(municipalityId),
     );
     locationsView.inert = true;
     locationsView.setAttribute("aria-hidden", "true");
@@ -280,16 +280,16 @@ export class CieloApp extends HTMLElement {
     this.#showLocations();
   };
 
-  #handleTemperatureChange = (event) => {
+  #handleCurrentForecastChange = (event) => {
     if (!(event instanceof CustomEvent)) {
       return;
     }
 
-    const { municipalityId, celsius } = /** @type {TemperatureChangeDetail} */ (
+    const { municipalityId, forecast } = /** @type {CurrentForecastChangeDetail} */ (
       event.detail
     );
-    this.#locationsView?.setTemperature(municipalityId, celsius);
-    this.#municipalityView?.setTemperature(municipalityId, celsius);
+    this.#locationsView?.setCurrentForecast(municipalityId, forecast);
+    this.#municipalityView?.setCurrentForecast(municipalityId, forecast);
   };
 
   #showLocations() {
@@ -314,7 +314,7 @@ export class CieloApp extends HTMLElement {
     }
 
     saveTrackedMunicipalityIds(this.#trackedIds);
-    this.#temperatures.setTrackedIds(this.#trackedIds);
+    this.#currentForecasts.setTrackedIds(this.#trackedIds);
     if (this.#lastOpenedId === municipalityId) {
       this.#lastOpenedId = null;
       saveLastOpenedMunicipalityId(null);

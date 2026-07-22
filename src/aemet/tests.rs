@@ -42,10 +42,20 @@ fn parses_and_orders_forecast_temperatures() {
                     "dia": [
                         {
                             "fecha": "2026-07-20",
+                            "estado_cielo": [{
+                                "periodo": "00",
+                                "valor": "24",
+                                "descripcion": "  Lluvia dÃ©bil  "
+                            }],
                             "temperatura": {"periodo": "00", "valor": "21"}
                         },
                         {
                             "fecha": "2026-07-19",
+                            "estado_cielo": [
+                                {"periodo": "11", "valor": "11n", "descripcion": "Despejado"},
+                                {"periodo": "09", "valor": "14", "descripcion": "Nuboso"},
+                                {"periodo": "10", "valor": "13", "descripcion": "  Intervalos nubosos  "}
+                            ],
                             "temperatura": [
                                 {"periodo": "11", "valor": "29"},
                                 {"periodo": "10", "valor": "27"}
@@ -67,19 +77,311 @@ fn parses_and_orders_forecast_temperatures() {
                 date: "2026-07-19".to_owned(),
                 hour: 10,
                 celsius: 27,
+                state: SkyState::CloudSun,
+                description: "Intervalos nubosos".to_owned(),
             },
             Temperature {
                 date: "2026-07-19".to_owned(),
                 hour: 11,
                 celsius: 29,
+                state: SkyState::Moon,
+                description: "Despejado".to_owned(),
             },
             Temperature {
                 date: "2026-07-20".to_owned(),
                 hour: 0,
                 celsius: 21,
+                state: SkyState::CloudRain,
+                description: "Lluvia débil".to_owned(),
             },
         ]
     );
+}
+
+#[test]
+fn rejects_scalar_sky_state_shape() {
+    let document = serde_json::json!({
+        "root": {
+            "id": "28079",
+            "elaborado": "2026-07-19T08:00:00",
+            "nombre": "Madrid",
+            "provincia": "Madrid",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-19",
+                    "estado_cielo": {
+                        "periodo": "10",
+                        "valor": "11",
+                        "descripcion": "Despejado"
+                    },
+                    "temperatura": {"periodo": "10", "valor": "27"}
+                }]
+            }
+        }
+    });
+
+    let error = serde_json::from_value::<ForecastDocument>(document)
+        .expect_err("AEMET condition data must use the observed array shape");
+
+    assert!(error.to_string().contains("expected a sequence"));
+}
+
+#[test]
+fn maps_every_supported_aemet_condition_code() {
+    let cases: &[(SkyState, &str, &[&str])] = &[
+        (SkyState::Cloud, "cloud", &["14"]),
+        (
+            SkyState::CloudDrizzle,
+            "cloud-drizzle",
+            &["44", "45", "45n", "46", "46n"],
+        ),
+        (
+            SkyState::CloudFog,
+            "cloud-fog",
+            &["81", "81n", "82", "82n", "83", "83n"],
+        ),
+        (
+            SkyState::CloudLightning,
+            "cloud-lightning",
+            &[
+                "51", "51n", "52", "52n", "53", "53n", "54", "54n", "61", "61n", "62", "62n", "63",
+                "63n", "64", "64n",
+            ],
+        ),
+        (SkyState::CloudMoon, "cloud-moon", &["13n", "14n", "17n"]),
+        (
+            SkyState::CloudMoonRain,
+            "cloud-moon-rain",
+            &["23n", "25n", "26n", "43n", "44n"],
+        ),
+        (
+            SkyState::CloudRain,
+            "cloud-rain",
+            &["24", "24n", "25", "26"],
+        ),
+        (
+            SkyState::CloudSnow,
+            "cloud-snow",
+            &[
+                "35n", "36n", "71", "71n", "72", "72n", "73", "73n", "74", "74n",
+            ],
+        ),
+        (SkyState::CloudSun, "cloud-sun", &["13", "17"]),
+        (SkyState::CloudSunRain, "cloud-sun-rain", &["23", "43"]),
+        (SkyState::Cloudy, "cloudy", &["15", "15n", "16", "16n"]),
+        (SkyState::Moon, "moon", &["11n", "12n"]),
+        (
+            SkyState::Snowflake,
+            "snowflake",
+            &["33", "33n", "34", "34n", "35", "36"],
+        ),
+        (SkyState::Sun, "sun", &["11", "12"]),
+    ];
+
+    let mut mapped_code_count = 0;
+    for (expected_state, wire_value, codes) in cases {
+        assert_eq!(
+            serde_json::to_value(expected_state).expect("state should serialize"),
+            serde_json::Value::String((*wire_value).to_owned())
+        );
+        for code in *codes {
+            assert_eq!(SkyState::from_aemet_code(code), Some(*expected_state));
+            mapped_code_count += 1;
+        }
+    }
+
+    assert_eq!(mapped_code_count, 68);
+}
+
+#[test]
+fn prolongs_latest_earlier_condition_for_missing_hour() {
+    let forecast = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([
+            {"periodo": "11", "valor": "11", "descripcion": "Despejado"},
+            {"periodo": "09", "valor": "13", "descripcion": "Intervalos nubosos"}
+        ]),
+    )
+    .expect("forecast should normalize")
+    .expect("forecast should remain included");
+
+    assert_eq!(forecast.temperatures[0].state, SkyState::CloudSun);
+    assert_eq!(forecast.temperatures[0].description, "Intervalos nubosos");
+}
+
+#[test]
+fn uses_closest_later_condition_before_first_available_state() {
+    let forecast = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([
+            {"periodo": "12", "valor": "13", "descripcion": "Intervalos nubosos"},
+            {"periodo": "11", "valor": "11", "descripcion": "Despejado"}
+        ]),
+    )
+    .expect("forecast should normalize")
+    .expect("forecast should remain included");
+
+    assert_eq!(forecast.temperatures[0].state, SkyState::Sun);
+    assert_eq!(forecast.temperatures[0].description, "Despejado");
+}
+
+#[test]
+fn omits_forecast_without_any_conditions() {
+    let forecast = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([]),
+    )
+    .expect("conditionless forecast should not fail the snapshot");
+
+    assert!(forecast.is_none());
+}
+
+#[test]
+fn rejects_archive_when_every_municipality_lacks_conditions() {
+    let archive = forecast_archive(
+        "localidad_h_01001.json",
+        r#"{
+            "root": {
+                "id": "01001",
+                "elaborado": "2026-07-22T08:00:00",
+                "nombre": "Alegría-Dulantzi",
+                "provincia": "Araba/Álava",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-22",
+                        "temperatura": {"periodo": "09", "valor": "18"}
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let error = parse_forecast_archive(&archive)
+        .expect_err("an entirely unusable archive should not generate an empty dataset");
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not contain any forecasts with sky conditions")
+    );
+}
+
+#[test]
+fn archive_excludes_conditionless_municipality_but_keeps_usable_forecasts() {
+    let conditionless = r#"{
+        "root": {
+            "id": "01001",
+            "elaborado": "2026-07-22T08:00:00",
+            "nombre": "Alegría-Dulantzi",
+            "provincia": "Araba/Álava",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-22",
+                    "temperatura": {"periodo": "09", "valor": "18"}
+                }]
+            }
+        }
+    }"#;
+    let usable = r#"{
+        "root": {
+            "id": "01002",
+            "elaborado": "2026-07-22T08:00:00",
+            "nombre": "Amurrio",
+            "provincia": "Araba/Álava",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-22",
+                    "estado_cielo": [{
+                        "periodo": "09",
+                        "valor": "11",
+                        "descripcion": "Despejado"
+                    }],
+                    "temperatura": {"periodo": "09", "valor": "19"}
+                }]
+            }
+        }
+    }"#;
+    let archive = forecast_archive_entries(&[
+        ("localidad_h_01001.json", conditionless),
+        ("localidad_h_01002.json", usable),
+    ]);
+
+    let forecasts = parse_forecast_archive(&archive).expect("usable forecast should remain");
+
+    assert_eq!(forecasts.len(), 1);
+    assert_eq!(forecasts[0].id, "01002");
+}
+
+#[test]
+fn rejects_empty_condition_codes_and_descriptions() {
+    for (sky_state, expected_message) in [
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "valor": "  ",
+                "descripcion": "Despejado"
+            }),
+            "empty condition code",
+        ),
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "valor": "11",
+                "descripcion": "  "
+            }),
+            "empty condition description",
+        ),
+    ] {
+        let error = normalize_single_day(
+            &serde_json::json!({"periodo": "10", "valor": "27"}),
+            &serde_json::json!([sky_state]),
+        )
+        .expect_err("empty condition values should fail");
+
+        assert!(error.to_string().contains(expected_message));
+    }
+}
+
+#[test]
+fn rejects_invalid_and_duplicate_condition_hours() {
+    let invalid_error = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([{
+            "periodo": "24",
+            "valor": "11",
+            "descripcion": "Despejado"
+        }]),
+    )
+    .expect_err("out-of-range condition hours should fail");
+    assert!(invalid_error.to_string().contains("invalid condition hour"));
+
+    let duplicate_error = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([
+            {"periodo": "10", "valor": "11", "descripcion": "Despejado"},
+            {"periodo": "10", "valor": "13", "descripcion": "Intervalos nubosos"}
+        ]),
+    )
+    .expect_err("duplicate condition hours should fail");
+    assert!(
+        duplicate_error
+            .to_string()
+            .contains("duplicate condition hours")
+    );
+}
+
+#[test]
+fn rejects_unknown_condition_codes_even_for_extra_hours() {
+    let error = normalize_single_day(
+        &serde_json::json!({"periodo": "10", "valor": "27"}),
+        &serde_json::json!([
+            {"periodo": "10", "valor": "11", "descripcion": "Despejado"},
+            {"periodo": "09", "valor": "99", "descripcion": "Estado nuevo"}
+        ]),
+    )
+    .expect_err("unknown conditions should fail the snapshot");
+
+    assert!(error.to_string().contains("unknown condition code"));
 }
 
 #[test]
@@ -330,21 +632,50 @@ fn redacts_sensitive_url_components() {
 }
 
 fn forecast_archive(path: &str, body: &str) -> Vec<u8> {
+    forecast_archive_entries(&[(path, body)])
+}
+
+fn forecast_archive_entries(entries: &[(&str, &str)]) -> Vec<u8> {
     let encoder = GzEncoder::new(Vec::new(), Compression::default());
     let mut archive = tar::Builder::new(encoder);
-    let mut header = tar::Header::new_gnu();
-    header.set_size(u64::try_from(body.len()).expect("test body should fit in u64"));
-    header.set_mode(0o644);
-    header.set_mtime(0);
-    header.set_cksum();
-    archive
-        .append_data(&mut header, path, body.as_bytes())
-        .expect("test archive entry should be written");
+    for (path, body) in entries {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(u64::try_from(body.len()).expect("test body should fit in u64"));
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, path, body.as_bytes())
+            .expect("test archive entry should be written");
+    }
     let mut encoder = archive
         .into_inner()
         .expect("test tar archive should finish");
     encoder.flush().expect("test gzip stream should flush");
     encoder.finish().expect("test gzip stream should finish")
+}
+
+fn normalize_single_day(
+    temperatures: &serde_json::Value,
+    sky_states: &serde_json::Value,
+) -> Result<Option<Forecast>> {
+    let document = serde_json::from_value::<ForecastDocument>(serde_json::json!({
+        "root": {
+            "id": "28079",
+            "elaborado": "2026-07-19T08:00:00",
+            "nombre": "Madrid",
+            "provincia": "Madrid",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-19",
+                    "estado_cielo": sky_states,
+                    "temperatura": temperatures
+                }]
+            }
+        }
+    }))
+    .expect("test forecast should deserialize");
+    normalize_forecast(document.root, "28079")
 }
 
 fn test_client(server: &mockito::Server, retry_base_delay: Duration) -> AemetClient {
