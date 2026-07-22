@@ -43,6 +43,12 @@ const catalogUrl = new URL("../../data/municipalities.json", import.meta.url);
  */
 
 /**
+ * @typedef {object} HourlyForecastChangeDetail
+ * @property {string} municipalityId
+ * @property {import("../lib/weather.js").HourlyForecastPeriod[]} forecasts
+ */
+
+/**
  * @typedef {{view: "locations"} | {view: "municipality", municipalityId: string}} NavigationState
  */
 
@@ -124,6 +130,10 @@ export class CieloApp extends HTMLElement {
     this.#currentForecasts.addEventListener(
       "currentforecastchange",
       this.#handleCurrentForecastChange,
+    );
+    this.#currentForecasts.addEventListener(
+      "hourlyforecastchange",
+      this.#handleHourlyForecastChange,
     );
   }
 
@@ -276,6 +286,7 @@ export class CieloApp extends HTMLElement {
     municipalityView.show(
       municipality,
       this.#currentForecasts.getCurrentForecast(municipalityId),
+      this.#currentForecasts.getHourlyForecast(municipalityId),
     );
     locationsView.inert = true;
     locationsView.setAttribute("aria-hidden", "true");
@@ -323,6 +334,17 @@ export class CieloApp extends HTMLElement {
     );
     this.#locationsView?.setCurrentForecast(municipalityId, forecast);
     this.#municipalityView?.setCurrentForecast(municipalityId, forecast);
+  };
+
+  #handleHourlyForecastChange = (event) => {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+
+    const { municipalityId, forecasts } = /** @type {HourlyForecastChangeDetail} */ (
+      event.detail
+    );
+    this.#municipalityView?.setHourlyForecast(municipalityId, forecasts);
   };
 
   #showLocations() {

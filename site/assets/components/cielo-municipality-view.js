@@ -5,10 +5,12 @@ const screenDismissVelocity = 0.5;
 
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
 /** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
+/** @typedef {import("../lib/weather.js").HourlyForecastPeriod} HourlyForecastPeriod */
 
 export class CieloMunicipalityView extends HTMLElement {
   #municipality = null;
   #currentForecast = null;
+  #hourlyForecast = [];
   #hiding = false;
   #edgeDismiss = false;
   #transitionToken = 0;
@@ -45,8 +47,12 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#cancelPendingTransition();
   }
 
-  /** @param {Municipality} municipality @param {CurrentForecast | null} currentForecast */
-  show(municipality, currentForecast) {
+  /**
+   * @param {Municipality} municipality
+   * @param {CurrentForecast | null} currentForecast
+   * @param {HourlyForecastPeriod[]} hourlyForecast
+   */
+  show(municipality, currentForecast, hourlyForecast) {
     const screen = this.#screen;
     const title = this.#title;
     const titleText = this.#titleText;
@@ -58,6 +64,7 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#cancelPendingTransition();
     this.#municipality = municipality;
     this.#currentForecast = currentForecast;
+    this.#hourlyForecast = hourlyForecast;
     this.#hiding = false;
     this.#edgeDismiss = false;
     this.#transitionToken += 1;
@@ -67,6 +74,7 @@ export class CieloMunicipalityView extends HTMLElement {
       `Cambiar ubicación. Ubicación actual: ${municipality.name}, ${municipality.province}`,
     );
     this.#renderCurrentForecast();
+    this.#renderHourlyForecast();
     this.hidden = false;
     screen.dataset.dragging = "false";
     screen.dataset.edgeDismiss = "false";
@@ -74,6 +82,9 @@ export class CieloMunicipalityView extends HTMLElement {
 
     // Present route changes immediately while resetting interactive offset.
     screen.style.setProperty("--screen-offset-x", "0px");
+    if (this.#hourlyScroller !== null) {
+      this.#hourlyScroller.scrollLeft = 0;
+    }
     this.#focusScreen();
   }
 
@@ -132,6 +143,7 @@ export class CieloMunicipalityView extends HTMLElement {
     this.hidden = true;
     this.#municipality = null;
     this.#currentForecast = null;
+    this.#hourlyForecast = [];
     this.#hiding = false;
     screen.style.setProperty("--screen-offset-x", "0px");
     screen.dataset.edgeDismiss = "false";
@@ -153,6 +165,19 @@ export class CieloMunicipalityView extends HTMLElement {
 
     this.#currentForecast = currentForecast;
     this.#renderCurrentForecast();
+  }
+
+  /**
+   * @param {string} municipalityId
+   * @param {HourlyForecastPeriod[]} hourlyForecast
+   */
+  setHourlyForecast(municipalityId, hourlyForecast) {
+    if (this.#municipality?.id !== municipalityId) {
+      return;
+    }
+
+    this.#hourlyForecast = hourlyForecast;
+    this.#renderHourlyForecast();
   }
 
   /** @param {{edgeSwipe?: boolean}} [options] */
@@ -353,6 +378,47 @@ export class CieloMunicipalityView extends HTMLElement {
       : `Temperatura actual: ${this.#currentForecast.celsius} grados Celsius`;
   }
 
+  #renderHourlyForecast() {
+    const section = this.shadowRoot?.querySelector("#hourly-forecast");
+    const list = this.shadowRoot?.querySelector("#hourly-forecast-list");
+    if (!(section instanceof HTMLElement) || !(list instanceof HTMLUListElement)) {
+      return;
+    }
+
+    // Keep the timeline out of the reading order until forecast data is ready.
+    section.hidden = this.#hourlyForecast.length === 0;
+    const periods = this.#hourlyForecast.map((period, index) => {
+      const item = document.createElement("li");
+      const hour = document.createElement("span");
+      const icon = document.createElement("cielo-icon");
+      const temperature = document.createElement("span");
+      const isCurrent = index === 0;
+      const hourLabel = isCurrent ? "Ahora" : String(period.hour);
+
+      item.className = "hourly-period";
+      item.dataset.current = String(isCurrent);
+      item.setAttribute("aria-label", formatHourlyForecastLabel(period, isCurrent));
+      hour.className = "hourly-hour";
+      hour.textContent = hourLabel;
+      icon.className = "hourly-condition-icon";
+      temperature.className = "hourly-temperature";
+      temperature.textContent = period.forecast === null
+        ? "—"
+        : `${period.forecast.celsius}°`;
+      if (period.forecast === null) {
+        icon.hidden = true;
+      } else {
+        icon.setAttribute("name", period.forecast.state);
+      }
+      hour.setAttribute("aria-hidden", "true");
+      icon.setAttribute("aria-hidden", "true");
+      temperature.setAttribute("aria-hidden", "true");
+      item.append(hour, icon, temperature);
+      return item;
+    });
+    list.replaceChildren(...periods);
+  }
+
   #cancelPendingTransition() {
     const screen = this.#screen;
     if (screen !== null && this.#transitionEndHandler !== null) {
@@ -387,6 +453,12 @@ export class CieloMunicipalityView extends HTMLElement {
   get #titleText() {
     const title = this.shadowRoot?.querySelector("#municipality-title");
     return title instanceof HTMLElement ? title : null;
+  }
+
+  /** @returns {HTMLElement | null} */
+  get #hourlyScroller() {
+    const scroller = this.shadowRoot?.querySelector(".hourly-scroll");
+    return scroller instanceof HTMLElement ? scroller : null;
   }
 
   #render() {
@@ -427,11 +499,10 @@ export class CieloMunicipalityView extends HTMLElement {
         .screen {
           position: fixed;
           inset: 0;
-          overflow-y: auto;
+          overflow: hidden;
           outline: none;
           color: var(--cielo-color-text);
           background: var(--cielo-color-municipality-background);
-          overscroll-behavior-y: contain;
           transform: translateX(var(--screen-offset-x, 0));
           transition: transform 220ms cubic-bezier(0.2, 0.82, 0.2, 1);
           will-change: transform;
@@ -581,6 +652,86 @@ export class CieloMunicipalityView extends HTMLElement {
           display: none;
         }
 
+        .hourly-forecast {
+          position: fixed;
+          bottom: calc(1.9rem + env(safe-area-inset-bottom));
+          left: 50%;
+          width: calc(100% - 3.8rem);
+          max-width: calc(var(--cielo-content-width) - 3.8rem);
+          margin: 0;
+          transform: translateX(-50%);
+        }
+
+        .hourly-forecast[hidden] {
+          display: none;
+        }
+
+        .hourly-scroll {
+          width: 100%;
+          overflow-x: auto;
+          border: 1px solid var(--cielo-color-border);
+          border-radius: 1rem;
+          outline: none;
+          outline-offset: -0.2rem;
+          overscroll-behavior-x: contain;
+          scrollbar-width: thin;
+          scroll-snap-type: x proximity;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .hourly-scroll:focus-visible {
+          outline: var(--cielo-focus-outline);
+        }
+
+        .hourly-list {
+          display: grid;
+          grid-auto-columns: 4.25rem;
+          grid-auto-flow: column;
+          width: max-content;
+          padding: 0.8rem 0.45rem 0.75rem;
+          margin: 0;
+          list-style: none;
+        }
+
+        .hourly-period {
+          display: grid;
+          grid-template-rows: 1.1rem 2rem 1.25rem;
+          gap: 0.35rem;
+          min-width: 0;
+          color: var(--cielo-color-text);
+          place-items: center;
+          scroll-snap-align: start;
+        }
+
+        .hourly-hour {
+          color: var(--cielo-color-muted);
+          font-size: var(--cielo-font-size-small);
+          font-variant-numeric: tabular-nums;
+          line-height: 1.1;
+        }
+
+        .hourly-period[data-current="true"] .hourly-hour {
+          color: var(--cielo-color-text);
+          font-weight: 650;
+        }
+
+        .hourly-condition-icon {
+          width: 1.75rem;
+          height: 1.75rem;
+          align-self: center;
+        }
+
+        .hourly-condition-icon[hidden] {
+          visibility: hidden;
+        }
+
+        .hourly-temperature {
+          font-size: 1rem;
+          font-variant-numeric: tabular-nums;
+          font-weight: 560;
+          line-height: 1.15;
+        }
+
         @media (min-width: 48rem) {
           .header {
             padding-top: calc(1.25rem + env(safe-area-inset-top));
@@ -638,6 +789,18 @@ export class CieloMunicipalityView extends HTMLElement {
               Temperatura actual no disponible
             </span>
           </div>
+          <section id="hourly-forecast" class="hourly-forecast" hidden>
+            <h2 id="hourly-forecast-title" class="visually-hidden">
+              Previsión por horas
+            </h2>
+            <div
+              class="hourly-scroll"
+              tabindex="0"
+              aria-labelledby="hourly-forecast-title"
+            >
+              <ul id="hourly-forecast-list" class="hourly-list"></ul>
+            </div>
+          </section>
           <p id="municipality-instructions" class="visually-hidden">
             Pulsa la lista o el nombre para elegir otra ubicación. También puedes deslizar hacia la derecha desde el borde izquierdo o usar Atrás.
           </p>
@@ -645,6 +808,16 @@ export class CieloMunicipalityView extends HTMLElement {
       </section>
     `;
   }
+}
+
+/** @param {HourlyForecastPeriod} period @param {boolean} isCurrent */
+function formatHourlyForecastLabel(period, isCurrent) {
+  const hourLabel = isCurrent ? "Ahora" : `${period.hour} horas`;
+  if (period.forecast === null) {
+    return `${hourLabel}. Previsión no disponible`;
+  }
+
+  return `${hourLabel}. ${period.forecast.celsius} grados Celsius. ${period.forecast.description}`;
 }
 
 customElements.define("cielo-municipality-view", CieloMunicipalityView);

@@ -158,7 +158,7 @@ fn publishes_complete_static_site() {
     assert!(script.contains("serviceWorker.register"));
     let service_worker = fs::read_to_string(output_dir.join("service-worker.js"))
         .expect("service worker should be readable");
-    assert!(service_worker.contains("shell-v1"));
+    assert!(service_worker.contains("shell-v2"));
     assert!(service_worker.contains("cacheFirst"));
     assert!(service_worker.contains("`${cachePrefix}data-v1`"));
     assert!(service_worker.contains("./assets/icons.svg"));

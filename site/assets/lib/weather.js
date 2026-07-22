@@ -4,6 +4,7 @@ import {
 } from "./data-cache.js";
 
 const forecastSchemaVersion = 1;
+const hourlyForecastPeriodCount = 24;
 const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
 const temperatureMinimum = -32_768;
@@ -39,6 +40,12 @@ const supportedSkyStates = new Set([
  * @property {string} municipalityId
  * @property {string} timezone
  * @property {Map<string, CurrentForecast>} forecastsByHour
+ */
+
+/**
+ * @typedef {object} HourlyForecastPeriod
+ * @property {number} hour
+ * @property {CurrentForecast | null} forecast
  */
 
 /**
@@ -104,6 +111,25 @@ export function selectCurrentForecast(forecast, now = new Date()) {
   return forecast.forecastsByHour.get(key) ?? null;
 }
 
+/**
+ * @param {HourlyForecast} forecast
+ * @param {Date} [now]
+ * @returns {HourlyForecastPeriod[]}
+ */
+export function selectHourlyForecast(forecast, now = new Date()) {
+  const currentHour = now.getTime() - now.getTime() % hourMilliseconds;
+
+  // Walk real elapsed hours so local labels remain correct across day and DST changes.
+  return Array.from({ length: hourlyForecastPeriodCount }, (_, index) => {
+    const instant = new Date(currentHour + index * hourMilliseconds);
+    const { key, hour } = forecastTime(instant, forecast.timezone);
+    return {
+      hour,
+      forecast: forecast.forecastsByHour.get(key) ?? null,
+    };
+  });
+}
+
 export class CurrentForecastStore extends EventTarget {
   #catalogById = new Map();
   #trackedIds = new Set();
@@ -144,7 +170,7 @@ export class CurrentForecastStore extends EventTarget {
     }
 
     // Recompute memory state, then hydrate from storage before using the network.
-    this.#recomputeCurrentForecasts();
+    this.#recomputeForecastSelections();
     void this.#hydrateAndRefreshIds([...this.#trackedIds]);
     this.#scheduleRefresh();
     this.#scheduleHourBoundary();
@@ -176,10 +202,11 @@ export class CurrentForecastStore extends EventTarget {
       if (!nextIds.has(id)) {
         this.#forecasts.delete(id);
         this.#publishCurrentForecast(id, null);
+        this.#publishHourlyForecast(id, []);
       }
     }
     this.#trackedIds = nextIds;
-    this.#recomputeCurrentForecasts();
+    this.#recomputeForecastSelections();
 
     if (this.#running && addedIds.length > 0) {
       void this.#hydrateAndRefreshIds(addedIds);
@@ -189,6 +216,14 @@ export class CurrentForecastStore extends EventTarget {
   /** @param {string} municipalityId @returns {CurrentForecast | null} */
   getCurrentForecast(municipalityId) {
     return this.#currentForecasts.get(municipalityId) ?? null;
+  }
+
+  /** @param {string} municipalityId @returns {HourlyForecastPeriod[]} */
+  getHourlyForecast(municipalityId) {
+    const forecast = this.#forecasts.get(municipalityId);
+    return forecast === undefined
+      ? []
+      : selectHourlyForecast(forecast, this.#now());
   }
 
   async refreshNow() {
@@ -287,19 +322,29 @@ export class CurrentForecastStore extends EventTarget {
    */
   #storeForecast(municipalityId, forecast) {
     this.#forecasts.set(municipalityId, forecast);
+    const now = this.#now();
     this.#publishCurrentForecast(
       municipalityId,
-      selectCurrentForecast(forecast, this.#now()),
+      selectCurrentForecast(forecast, now),
+    );
+    this.#publishHourlyForecast(
+      municipalityId,
+      selectHourlyForecast(forecast, now),
     );
   }
 
-  #recomputeCurrentForecasts() {
+  #recomputeForecastSelections() {
+    const now = this.#now();
     for (const municipalityId of this.#trackedIds) {
       const forecast = this.#forecasts.get(municipalityId);
       if (forecast !== undefined) {
         this.#publishCurrentForecast(
           municipalityId,
-          selectCurrentForecast(forecast, this.#now()),
+          selectCurrentForecast(forecast, now),
+        );
+        this.#publishHourlyForecast(
+          municipalityId,
+          selectHourlyForecast(forecast, now),
         );
       }
     }
@@ -324,6 +369,18 @@ export class CurrentForecastStore extends EventTarget {
     this.dispatchEvent(
       new CustomEvent("currentforecastchange", {
         detail: { municipalityId, forecast },
+      }),
+    );
+  }
+
+  /**
+   * @param {string} municipalityId
+   * @param {HourlyForecastPeriod[]} forecasts
+   */
+  #publishHourlyForecast(municipalityId, forecasts) {
+    this.dispatchEvent(
+      new CustomEvent("hourlyforecastchange", {
+        detail: { municipalityId, forecasts },
       }),
     );
   }
@@ -358,7 +415,7 @@ export class CurrentForecastStore extends EventTarget {
       hourMilliseconds - (now.getTime() % hourMilliseconds);
     this.#hourTimeoutId = window.setTimeout(() => {
       this.#hourTimeoutId = null;
-      this.#recomputeCurrentForecasts();
+      this.#recomputeForecastSelections();
       void this.refreshNow();
       this.#scheduleHourBoundary();
     }, millisecondsUntilNextHour + 50);
@@ -376,13 +433,13 @@ export class CurrentForecastStore extends EventTarget {
   }
 
   #handleOnline = () => {
-    this.#recomputeCurrentForecasts();
+    this.#recomputeForecastSelections();
     void this.refreshNow();
   };
 
   #handleVisibilityChange = () => {
     if (document.visibilityState === "visible") {
-      this.#recomputeCurrentForecasts();
+      this.#recomputeForecastSelections();
       void this.refreshNow();
       this.#scheduleRefresh();
       this.#scheduleHourBoundary();
@@ -459,6 +516,11 @@ function maximumDayOfMonth(year, month) {
 
 /** @param {Date} now @param {string} timezone */
 function currentForecastKey(now, timezone) {
+  return forecastTime(now, timezone).key;
+}
+
+/** @param {Date} instant @param {string} timezone */
+function forecastTime(instant, timezone) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
@@ -468,9 +530,12 @@ function currentForecastKey(now, timezone) {
     hourCycle: "h23",
   });
   const parts = Object.fromEntries(
-    formatter.formatToParts(now).map(({ type, value }) => [type, value]),
+    formatter.formatToParts(instant).map(({ type, value }) => [type, value]),
   );
-  return `${parts.year}-${parts.month}-${parts.day}:${parts.hour}`;
+  return {
+    key: `${parts.year}-${parts.month}-${parts.day}:${parts.hour}`,
+    hour: Number(parts.hour),
+  };
 }
 
 /** @param {string} date @param {number} hour */

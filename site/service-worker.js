@@ -1,6 +1,6 @@
 const cachePrefix = "cielo-";
 // Bump the shell version whenever a release changes the precached application.
-const shellCacheName = `${cachePrefix}shell-v1`;
+const shellCacheName = `${cachePrefix}shell-v2`;
 // Application code owns this cache and writes only schema-validated responses.
 const dataCacheName = `${cachePrefix}data-v1`;
 const shellPaths = [
