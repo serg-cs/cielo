@@ -9,6 +9,10 @@ import {
   saveTrackedMunicipalityIds,
 } from "../lib/storage.js";
 import {
+  fetchValidatedJson,
+  readValidatedJson,
+} from "../lib/data-cache.js";
+import {
   CurrentForecastStore,
 } from "../lib/weather.js";
 import {
@@ -19,6 +23,7 @@ import {
 } from "./cielo-municipality-view.js";
 
 const navigationStateKey = "cielo";
+const catalogUrl = new URL("../../data/municipalities.json", import.meta.url);
 
 /**
  * @typedef {object} MunicipalityOpenDetail
@@ -129,49 +134,77 @@ export class CieloApp extends HTMLElement {
     }
 
     try {
-      // Validate and index the catalog before exposing any interactive control.
-      const response = await fetch("./data/municipalities.json", {
-        cache: "no-cache",
-      });
-      if (!response.ok) {
-        throw new Error(
-          `No se pudieron cargar los municipios: HTTP ${response.status}`,
-        );
+      // Render a validated on-device catalog before refreshing it for the next load.
+      const cachedMunicipalities = await readValidatedJson(
+        catalogUrl,
+        validateMunicipalities,
+      );
+      if (cachedMunicipalities !== null) {
+        this.#showCatalog(cachedMunicipalities);
+        void this.#refreshCachedCatalog();
+        return;
       }
 
-      this.#municipalities = validateMunicipalities(await response.json());
-      this.#municipalitiesById = new Map(
-        this.#municipalities.map((municipality) => [municipality.id, municipality]),
+      const municipalities = await fetchValidatedJson(
+        catalogUrl,
+        validateMunicipalities,
       );
-      this.#trackedIds = new Set(
-        [...readTrackedMunicipalityIds()].filter((id) =>
-          this.#municipalitiesById.has(id),
-        ),
-      );
-      const storedLastOpenedId = readLastOpenedMunicipalityId();
-      this.#lastOpenedId = storedLastOpenedId !== null &&
-          this.#trackedIds.has(storedLastOpenedId)
-        ? storedLastOpenedId
-        : null;
-      if (storedLastOpenedId !== null && this.#lastOpenedId === null) {
-        saveLastOpenedMunicipalityId(null);
-      }
-
-      // Render stable saved state before applying initial navigation.
-      locationsView.catalog = this.#municipalities;
-      locationsView.trackedIds = this.#trackedIds;
-      locationsView.showReady();
-      if (this.isConnected) {
-        this.#currentForecasts.start(this.#municipalities, this.#trackedIds);
-      }
-      this.dataset.ready = "true";
-      this.#initializeNavigation();
+      this.#showCatalog(municipalities);
     } catch (error) {
       console.error(error);
       locationsView.showError();
       this.dataset.ready = "true";
       this.#replaceNavigationState({ view: "locations" });
       this.#setThemeColor("--cielo-color-locations-background");
+    }
+  }
+
+  /** @param {import("../lib/catalog.js").Municipality[]} municipalities */
+  #showCatalog(municipalities) {
+    const locationsView = this.#locationsView;
+    if (locationsView === null) {
+      return;
+    }
+
+    this.#municipalities = municipalities;
+    this.#municipalitiesById = new Map(
+      this.#municipalities.map((municipality) => [municipality.id, municipality]),
+    );
+    this.#trackedIds = new Set(
+      [...readTrackedMunicipalityIds()].filter((id) =>
+        this.#municipalitiesById.has(id)
+      ),
+    );
+    const storedLastOpenedId = readLastOpenedMunicipalityId();
+    this.#lastOpenedId = storedLastOpenedId !== null &&
+        this.#trackedIds.has(storedLastOpenedId)
+      ? storedLastOpenedId
+      : null;
+    if (storedLastOpenedId !== null && this.#lastOpenedId === null) {
+      saveLastOpenedMunicipalityId(null);
+    }
+
+    // Render stable saved state before applying initial navigation.
+    locationsView.catalog = this.#municipalities;
+    locationsView.trackedIds = this.#trackedIds;
+    locationsView.showReady();
+    if (this.isConnected) {
+      this.#currentForecasts.start(this.#municipalities, this.#trackedIds);
+    }
+    this.dataset.ready = "true";
+    this.#initializeNavigation();
+  }
+
+  async #refreshCachedCatalog() {
+    if (!navigator.onLine) {
+      return;
+    }
+
+    try {
+      // The next navigation receives the refreshed, validated catalog.
+      await fetchValidatedJson(catalogUrl, validateMunicipalities);
+    } catch (error) {
+      console.warn("No se pudo actualizar el catálogo guardado", error);
     }
   }
 

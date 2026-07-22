@@ -1,29 +1,5 @@
-const iconUrls = new Map(
-  [
-    "circle-x",
-    "cloud",
-    "cloud-drizzle",
-    "cloud-fog",
-    "cloud-lightning",
-    "cloud-moon",
-    "cloud-moon-rain",
-    "cloud-rain",
-    "cloud-snow",
-    "cloud-sun",
-    "cloud-sun-rain",
-    "cloudy",
-    "list",
-    "map-pin",
-    "moon",
-    "search",
-    "snowflake",
-    "sun",
-    "trash-2",
-  ].map((name) => [
-    name,
-    new URL(`../icons/${name}.svg`, import.meta.url),
-  ]),
-);
+const iconNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const spriteUrl = new URL("../icons.svg", import.meta.url);
 
 export class CieloIcon extends HTMLElement {
   static observedAttributes = ["name"];
@@ -44,23 +20,22 @@ export class CieloIcon extends HTMLElement {
   }
 
   #updateIcon() {
-    const glyph = this.shadowRoot?.querySelector(".glyph");
-    if (!(glyph instanceof HTMLElement)) {
+    const icon = this.shadowRoot?.querySelector(".icon");
+    const use = this.shadowRoot?.querySelector("use");
+    if (!(icon instanceof SVGSVGElement) || !(use instanceof SVGUseElement)) {
       return;
     }
 
     const name = this.getAttribute("name") ?? "";
-    const iconUrl = iconUrls.get(name);
-    if (iconUrl === undefined) {
-      glyph.hidden = true;
+    if (!iconNamePattern.test(name)) {
+      icon.hidden = true;
+      use.removeAttribute("href");
       return;
     }
 
-    // Use the SVG alpha channel while inheriting color from the caller.
-    const maskImage = `url("${iconUrl.href}")`;
-    glyph.hidden = false;
-    glyph.style.maskImage = maskImage;
-    glyph.style.webkitMaskImage = maskImage;
+    // Resolve every validated name against the one generated sprite resource.
+    use.setAttribute("href", `${spriteUrl.href}#${name}`);
+    icon.hidden = false;
   }
 
   #render() {
@@ -81,24 +56,29 @@ export class CieloIcon extends HTMLElement {
           vertical-align: -0.125em;
         }
 
-        .glyph {
+        .icon {
           display: block;
           width: 100%;
           height: 100%;
-          background: currentcolor;
-          mask-position: center;
-          mask-repeat: no-repeat;
-          mask-size: contain;
-          -webkit-mask-position: center;
-          -webkit-mask-repeat: no-repeat;
-          -webkit-mask-size: contain;
+          fill: none;
+          stroke: currentcolor;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2;
         }
 
-        .glyph[hidden] {
+        .icon[hidden] {
           display: none;
         }
       </style>
-      <span class="glyph"></span>
+      <svg
+        class="icon"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <use></use>
+      </svg>
     `;
   }
 }

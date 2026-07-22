@@ -2,6 +2,7 @@ const collator = new Intl.Collator("es", {
   numeric: true,
   sensitivity: "base",
 });
+const catalogSchemaVersion = 1;
 const supportedTimezones = new Set([
   "Africa/Ceuta",
   "Atlantic/Canary",
@@ -40,6 +41,8 @@ export function validateMunicipalities(document) {
   if (
     typeof document !== "object" ||
     document === null ||
+    !("schema_version" in document) ||
+    document.schema_version !== catalogSchemaVersion ||
     !("municipalities" in document) ||
     !Array.isArray(document.municipalities) ||
     !document.municipalities.every(isMunicipality)

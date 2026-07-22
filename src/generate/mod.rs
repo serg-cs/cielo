@@ -21,6 +21,8 @@ const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
 const DATA_DIRECTORY: &str = "data";
 const DATA_MARKER_CONTENT: &str = "cielo-output=data\ncielo-schema=1\n";
+const ICONS_DIRECTORY: &str = "assets/icons";
+const ICON_SPRITE_FILENAME: &str = "assets/icons.svg";
 const LEGACY_DATA_MARKER_CONTENT: &str = "cielo-schema=1\n";
 const MANAGED_MARKER: &str = ".cielo-generated";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
@@ -233,7 +235,104 @@ fn write_site_assets(output_dir: &Path) -> Result<()> {
     // Keep the generated artifact independent from the source checkout.
     SITE_DIRECTORY
         .extract(output_dir)
-        .context("failed to write embedded site assets")
+        .context("failed to write embedded site assets")?;
+
+    // Derive the deployable sprite from the canonical individual SVG files.
+    write_icon_sprite(output_dir)
+}
+
+fn write_icon_sprite(output_dir: &Path) -> Result<()> {
+    let icons_dir = output_dir.join(ICONS_DIRECTORY);
+    let sprite = build_icon_sprite(&icons_dir)?;
+    let sprite_path = output_dir.join(ICON_SPRITE_FILENAME);
+    fs::write(&sprite_path, sprite)
+        .with_context(|| format!("failed to write icon sprite {}", sprite_path.display()))
+}
+
+fn build_icon_sprite(icons_dir: &Path) -> Result<String> {
+    let mut icon_paths = fs::read_dir(icons_dir)
+        .with_context(|| format!("failed to read icon directory {}", icons_dir.display()))?
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.path().extension().is_some_and(|value| value == "svg") => {
+                Some(Ok(entry.path()))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<std::io::Result<Vec<_>>>()
+        .with_context(|| format!("failed to inspect icon directory {}", icons_dir.display()))?;
+    icon_paths.sort();
+    if icon_paths.is_empty() {
+        bail!(
+            "icon directory does not contain SVG files: {}",
+            icons_dir.display()
+        );
+    }
+
+    // Stable ordering makes generated releases and reviews reproducible.
+    let mut sprite = String::from(
+        "<!-- Generated from assets/icons/*.svg; see assets/icons/LICENSE. -->\n\
+         <svg xmlns=\"http://www.w3.org/2000/svg\">\n",
+    );
+    for icon_path in icon_paths {
+        let icon_name = icon_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .context("icon filename is not valid UTF-8")?;
+        let source = fs::read_to_string(&icon_path)
+            .with_context(|| format!("failed to read icon {}", icon_path.display()))?;
+        sprite.push_str(&build_icon_symbol(icon_name, &source)?);
+    }
+    sprite.push_str("</svg>\n");
+
+    Ok(sprite)
+}
+
+fn build_icon_symbol(icon_name: &str, source: &str) -> Result<String> {
+    if !is_valid_icon_name(icon_name) {
+        bail!("invalid icon name: {icon_name}");
+    }
+
+    // Retain the source root attributes and body without copying glyphs by hand.
+    let root_start = source
+        .find("<svg")
+        .context("icon does not contain an SVG root")?;
+    let root_open_end = source[root_start..]
+        .find('>')
+        .map(|offset| root_start + offset)
+        .context("icon SVG root is not closed")?;
+    let root_close_start = source
+        .rfind("</svg>")
+        .context("icon does not close its SVG root")?;
+    if root_close_start <= root_open_end {
+        bail!("icon SVG root closes before its content");
+    }
+    if !source[root_close_start + "</svg>".len()..]
+        .trim()
+        .is_empty()
+    {
+        bail!("icon contains content after its SVG root");
+    }
+
+    let attributes = &source[root_start + "<svg".len()..root_open_end];
+    if attributes.contains("id=") {
+        bail!("icon SVG root must not define an ID");
+    }
+    let body = &source[root_open_end + 1..root_close_start];
+
+    Ok(format!(
+        "  <symbol id=\"{icon_name}\"{attributes}>{body}  </symbol>\n"
+    ))
+}
+
+fn is_valid_icon_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('-').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        })
 }
 
 fn write_data_files(output_dir: &Path, snapshot: &Snapshot) -> Result<()> {

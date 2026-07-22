@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::Path};
 
 use serde_json::Value;
 
@@ -102,6 +102,7 @@ fn publishes_complete_static_site() {
     assert!(index.contains("<cielo-app></cielo-app>"));
     assert!(index.contains("viewport-fit=cover"));
     assert!(index.contains("name=\"theme-color\""));
+    assert!(index.contains("rel=\"modulepreload\""));
     assert!(index.contains("type=\"module\" src=\"./assets/site.js\""));
     assert!(output_dir.join("icon.svg").is_file());
     assert!(output_dir.join("assets/site.css").is_file());
@@ -113,8 +114,9 @@ fn publishes_complete_static_site() {
     let service_worker = fs::read_to_string(output_dir.join("service-worker.js"))
         .expect("service worker should be readable");
     assert!(service_worker.contains("shell-v1"));
-    assert!(service_worker.contains("cache: \"no-cache\""));
-    assert!(service_worker.contains("./data/municipalities.json"));
+    assert!(service_worker.contains("cacheFirst"));
+    assert!(service_worker.contains("`${cachePrefix}data-v1`"));
+    assert!(service_worker.contains("./assets/icons.svg"));
 
     // Recursive embedding must include every dependency of the module entrypoint.
     let app = fs::read_to_string(output_dir.join("assets/components/cielo-app.js"))
@@ -127,6 +129,7 @@ fn publishes_complete_static_site() {
         "assets/components/cielo-municipality-row.js",
         "assets/components/cielo-municipality-view.js",
         "assets/lib/catalog.js",
+        "assets/lib/data-cache.js",
         "assets/lib/storage.js",
         "assets/lib/weather.js",
     ] {
@@ -136,8 +139,21 @@ fn publishes_complete_static_site() {
         .expect("storage library should be readable");
     assert!(storage.contains("cielo.trackedMunicipalities"));
     assert!(storage.contains("cielo.lastMunicipality"));
+    assert_complete_icon_assets(&output_dir, &service_worker);
+    assert!(output_dir.join("data/temperatures/35001.json").is_file());
+}
+
+fn assert_complete_icon_assets(output_dir: &Path, service_worker: &str) {
     let icon_component = fs::read_to_string(output_dir.join("assets/components/cielo-icon.js"))
         .expect("icon component should be readable");
+    assert!(icon_component.contains("new URL(\"../icons.svg\", import.meta.url)"));
+    assert!(icon_component.contains("<use></use>"));
+    assert!(!icon_component.contains("const iconGlyphs"));
+    assert!(!icon_component.contains("<path"));
+    assert!(!icon_component.contains("maskImage"));
+    let icon_sprite = fs::read_to_string(output_dir.join(ICON_SPRITE_FILENAME))
+        .expect("icon sprite should be readable");
+    let mut previous_symbol_position = None;
     for icon in [
         "circle-x.svg",
         "cloud-drizzle.svg",
@@ -164,16 +180,46 @@ fn publishes_complete_static_site() {
             "missing icon {icon}"
         );
         assert!(
-            service_worker.contains(&format!("./assets/icons/{icon}")),
-            "icon is not precached: {icon}"
+            !service_worker.contains(&format!("./assets/icons/{icon}")),
+            "source icon is still precached separately: {icon}"
         );
+        let symbol = format!("<symbol id=\"{}\"", icon.trim_end_matches(".svg"));
+        let symbol_position = icon_sprite
+            .find(&symbol)
+            .unwrap_or_else(|| panic!("icon sprite is missing {symbol}"));
         assert!(
-            icon_component.contains(&format!("\"{}\"", icon.trim_end_matches(".svg"))),
-            "icon is not registered: {icon}"
+            previous_symbol_position.is_none_or(|previous| previous < symbol_position),
+            "icon sprite is not deterministically sorted at {icon}"
         );
+        previous_symbol_position = Some(symbol_position);
     }
+    assert_eq!(icon_sprite.matches("<symbol id=").count(), 19);
     assert!(output_dir.join("assets/icons/LICENSE").is_file());
-    assert!(output_dir.join("data/temperatures/35001.json").is_file());
+}
+
+#[test]
+fn builds_icon_symbol_from_canonical_svg() {
+    let source = r#"<!-- license -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="currentColor">
+  <path d="M1 2h3" />
+</svg>
+"#;
+
+    let symbol = build_icon_symbol("sample-icon", source).expect("symbol should build");
+
+    assert!(symbol.starts_with("  <symbol id=\"sample-icon\""));
+    assert!(symbol.contains("viewBox=\"0 0 24 24\""));
+    assert!(symbol.contains("stroke=\"currentColor\""));
+    assert!(symbol.contains("<path d=\"M1 2h3\" />"));
+    assert!(!symbol.contains("<svg"));
+}
+
+#[test]
+fn rejects_invalid_icon_symbols() {
+    assert!(build_icon_symbol("../escape", "<svg></svg>").is_err());
+    assert!(build_icon_symbol("search", "<svg id=\"duplicate\"></svg>").is_err());
+    assert!(build_icon_symbol("search", "<svg><path /></svg>trailing").is_err());
+    assert!(build_icon_symbol("search", "<svg><path /></symbol>").is_err());
 }
 
 #[test]

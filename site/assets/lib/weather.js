@@ -1,3 +1,8 @@
+import {
+  fetchValidatedJson,
+  readValidatedJson,
+} from "./data-cache.js";
+
 const forecastSchemaVersion = 1;
 const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
@@ -136,15 +141,11 @@ export class CurrentForecastStore extends EventTarget {
       this.#running = true;
       window.addEventListener("online", this.#handleOnline);
       document.addEventListener("visibilitychange", this.#handleVisibilityChange);
-      navigator.serviceWorker?.addEventListener(
-        "controllerchange",
-        this.#handleControllerChange,
-      );
     }
 
-    // Recompute immediately before starting the recurring refresh cycles.
+    // Recompute memory state, then hydrate from storage before using the network.
     this.#recomputeCurrentForecasts();
-    void this.refreshNow();
+    void this.#hydrateAndRefreshIds([...this.#trackedIds]);
     this.#scheduleRefresh();
     this.#scheduleHourBoundary();
   }
@@ -159,10 +160,6 @@ export class CurrentForecastStore extends EventTarget {
     document.removeEventListener(
       "visibilitychange",
       this.#handleVisibilityChange,
-    );
-    navigator.serviceWorker?.removeEventListener(
-      "controllerchange",
-      this.#handleControllerChange,
     );
     this.#clearTimers();
   }
@@ -185,7 +182,7 @@ export class CurrentForecastStore extends EventTarget {
     this.#recomputeCurrentForecasts();
 
     if (this.#running && addedIds.length > 0) {
-      void this.#refreshIds(addedIds);
+      void this.#hydrateAndRefreshIds(addedIds);
     }
   }
 
@@ -196,6 +193,42 @@ export class CurrentForecastStore extends EventTarget {
 
   async refreshNow() {
     await this.#refreshIds([...this.#trackedIds]);
+  }
+
+  /** @param {string[]} municipalityIds */
+  async #hydrateAndRefreshIds(municipalityIds) {
+    await Promise.all(
+      municipalityIds.map((municipalityId) =>
+        this.#hydrateAndRefreshMunicipality(municipalityId)
+      ),
+    );
+  }
+
+  /** @param {string} municipalityId */
+  async #hydrateAndRefreshMunicipality(municipalityId) {
+    const municipality = this.#catalogById.get(municipalityId);
+    if (municipality === undefined || !this.#trackedIds.has(municipalityId)) {
+      return;
+    }
+
+    if (!this.#forecasts.has(municipalityId)) {
+      const forecast = await readValidatedJson(
+        forecastUrl(municipality.id),
+        (document) => validateForecastDocument(document, municipality),
+      );
+      if (
+        forecast !== null &&
+        this.#trackedIds.has(municipalityId) &&
+        !this.#forecasts.has(municipalityId)
+      ) {
+        this.#storeForecast(municipalityId, forecast);
+      }
+    }
+    if (!navigator.onLine) {
+      return;
+    }
+
+    await this.#refreshMunicipality(municipalityId);
   }
 
   /** @param {string[]} municipalityIds */
@@ -236,28 +269,26 @@ export class CurrentForecastStore extends EventTarget {
 
   /** @param {Municipality} municipality */
   async #loadForecast(municipality) {
-    const url = new URL(
-      `./data/temperatures/${encodeURIComponent(municipality.id)}.json`,
-      document.baseURI,
-    );
-    const response = await this.#fetcher(url, { cache: "no-cache" });
-    if (!response.ok) {
-      throw new Error(
-        `No se pudieron cargar las temperaturas: HTTP ${response.status}`,
-      );
-    }
-
-    const forecast = validateForecastDocument(
-      await response.json(),
-      municipality,
+    const forecast = await fetchValidatedJson(
+      forecastUrl(municipality.id),
+      (document) => validateForecastDocument(document, municipality),
+      this.#fetcher,
     );
     if (!this.#trackedIds.has(municipality.id)) {
       return;
     }
 
-    this.#forecasts.set(municipality.id, forecast);
+    this.#storeForecast(municipality.id, forecast);
+  }
+
+  /**
+   * @param {string} municipalityId
+   * @param {HourlyForecast} forecast
+   */
+  #storeForecast(municipalityId, forecast) {
+    this.#forecasts.set(municipalityId, forecast);
     this.#publishCurrentForecast(
-      municipality.id,
+      municipalityId,
       selectCurrentForecast(forecast, this.#now()),
     );
   }
@@ -360,15 +391,14 @@ export class CurrentForecastStore extends EventTarget {
 
     this.#clearTimers();
   };
+}
 
-  #handleControllerChange = async () => {
-    // Let uncontrolled requests settle before refetching through the new controller.
-    const requestsBeforeTakeover = [...this.#inFlight.values()];
-    await Promise.all(requestsBeforeTakeover);
-    if (this.#running) {
-      await this.refreshNow();
-    }
-  };
+/** @param {string} municipalityId */
+function forecastUrl(municipalityId) {
+  return new URL(
+    `./data/temperatures/${encodeURIComponent(municipalityId)}.json`,
+    document.baseURI,
+  );
 }
 
 /** @param {unknown} value */
