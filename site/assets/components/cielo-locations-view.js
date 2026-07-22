@@ -13,6 +13,7 @@ import {
 export class CieloLocationsView extends HTMLElement {
   #catalog = [];
   #trackedIds = new Set();
+  #temperatures = new Map();
   #ready = false;
   #searchActive = false;
 
@@ -93,6 +94,27 @@ export class CieloLocationsView extends HTMLElement {
     for (const row of this.#savedRows) {
       if (row !== except) {
         row.closeAction();
+      }
+    }
+  }
+
+  /** @param {string} municipalityId @param {number | null} celsius */
+  setTemperature(municipalityId, celsius) {
+    if (celsius === null) {
+      this.#temperatures.delete(municipalityId);
+    } else {
+      this.#temperatures.set(municipalityId, celsius);
+    }
+
+    // Update existing rows in place so live weather does not disturb interaction state.
+    for (const row of this.shadowRoot?.querySelectorAll(
+      "cielo-municipality-row",
+    ) ?? []) {
+      if (
+        row instanceof CieloMunicipalityRow &&
+        row.municipality?.id === municipalityId
+      ) {
+        row.temperature = celsius;
       }
     }
   }
@@ -549,6 +571,7 @@ export class CieloLocationsView extends HTMLElement {
     row.mode = mode;
     row.tracked = this.#trackedIds.has(municipality.id);
     row.municipality = municipality;
+    row.temperature = this.#temperatures.get(municipality.id) ?? null;
     if (mode === "saved") {
       row.dataset.saved = "";
     }

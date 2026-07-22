@@ -2,6 +2,11 @@ const collator = new Intl.Collator("es", {
   numeric: true,
   sensitivity: "base",
 });
+const supportedTimezones = new Set([
+  "Africa/Ceuta",
+  "Atlantic/Canary",
+  "Europe/Madrid",
+]);
 
 export const minimumSearchLength = 2;
 
@@ -10,6 +15,7 @@ export const minimumSearchLength = 2;
  * @property {string} id
  * @property {string} name
  * @property {string} province
+ * @property {string} timezone
  * @property {string} [searchName]
  */
 
@@ -60,7 +66,10 @@ function isMunicipality(value) {
     "name" in value &&
     typeof value.name === "string" &&
     "province" in value &&
-    typeof value.province === "string"
+    typeof value.province === "string" &&
+    "timezone" in value &&
+    typeof value.timezone === "string" &&
+    supportedTimezones.has(value.timezone)
   );
 }
 

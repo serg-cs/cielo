@@ -103,6 +103,11 @@ fn publishes_complete_static_site() {
         fs::read_to_string(output_dir.join("assets/site.js")).expect("script should be readable");
     assert!(script.contains("./components/cielo-icon.js"));
     assert!(script.contains("./components/cielo-app.js"));
+    assert!(script.contains("serviceWorker.register"));
+    let service_worker = fs::read_to_string(output_dir.join("service-worker.js"))
+        .expect("service worker should be readable");
+    assert!(service_worker.contains("cache: \"no-cache\""));
+    assert!(service_worker.contains("./data/municipalities.json"));
 
     // Recursive embedding must include every dependency of the module entrypoint.
     let app = fs::read_to_string(output_dir.join("assets/components/cielo-app.js"))
@@ -116,6 +121,7 @@ fn publishes_complete_static_site() {
         "assets/components/cielo-municipality-view.js",
         "assets/lib/catalog.js",
         "assets/lib/storage.js",
+        "assets/lib/weather.js",
     ] {
         assert!(output_dir.join(module).is_file(), "missing module {module}");
     }

@@ -9,6 +9,9 @@ import {
   saveTrackedMunicipalityIds,
 } from "../lib/storage.js";
 import {
+  CurrentTemperatureStore,
+} from "../lib/weather.js";
+import {
   CieloLocationsView,
 } from "./cielo-locations-view.js";
 import {
@@ -29,6 +32,12 @@ const navigationStateKey = "cielo";
  */
 
 /**
+ * @typedef {object} TemperatureChangeDetail
+ * @property {string} municipalityId
+ * @property {number | null} celsius
+ */
+
+/**
  * @typedef {{view: "locations"} | {view: "municipality", municipalityId: string}} NavigationState
  */
 
@@ -39,6 +48,7 @@ export class CieloApp extends HTMLElement {
   #selectedId = null;
   #lastOpenedId = null;
   #initialized = false;
+  #temperatures = new CurrentTemperatureStore();
 
   constructor() {
     super();
@@ -49,6 +59,9 @@ export class CieloApp extends HTMLElement {
   connectedCallback() {
     window.addEventListener("popstate", this.#handlePopState);
     if (this.#initialized) {
+      if (this.#municipalities.length > 0) {
+        this.#temperatures.start(this.#municipalities, this.#trackedIds);
+      }
       return;
     }
 
@@ -59,6 +72,7 @@ export class CieloApp extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("popstate", this.#handlePopState);
+    this.#temperatures.stop();
   }
 
   /** @returns {CieloLocationsView | null} */
@@ -102,6 +116,10 @@ export class CieloApp extends HTMLElement {
         /** @type {MunicipalityIdentityDetail} */ (event.detail).municipalityId,
       );
     });
+    this.#temperatures.addEventListener(
+      "temperaturechange",
+      this.#handleTemperatureChange,
+    );
   }
 
   async #initialize() {
@@ -112,7 +130,9 @@ export class CieloApp extends HTMLElement {
 
     try {
       // Validate and index the catalog before exposing any interactive control.
-      const response = await fetch("./data/municipalities.json");
+      const response = await fetch("./data/municipalities.json", {
+        cache: "no-cache",
+      });
       if (!response.ok) {
         throw new Error(
           `No se pudieron cargar los municipios: HTTP ${response.status}`,
@@ -141,6 +161,9 @@ export class CieloApp extends HTMLElement {
       locationsView.catalog = this.#municipalities;
       locationsView.trackedIds = this.#trackedIds;
       locationsView.showReady();
+      if (this.isConnected) {
+        this.#temperatures.start(this.#municipalities, this.#trackedIds);
+      }
       this.dataset.ready = "true";
       this.#initializeNavigation();
     } catch (error) {
@@ -188,6 +211,7 @@ export class CieloApp extends HTMLElement {
     if (shouldTrack) {
       this.#trackedIds.add(municipalityId);
       saveTrackedMunicipalityIds(this.#trackedIds);
+      this.#temperatures.setTrackedIds(this.#trackedIds);
     }
 
     const locationsView = this.#locationsView;
@@ -216,7 +240,10 @@ export class CieloApp extends HTMLElement {
     locationsView.closeSwipeRows();
     this.#selectedId = municipalityId;
     this.#setThemeColor("--cielo-color-municipality-background");
-    municipalityView.show(municipality);
+    municipalityView.show(
+      municipality,
+      this.#temperatures.getCurrentTemperature(municipalityId),
+    );
     locationsView.inert = true;
     locationsView.setAttribute("aria-hidden", "true");
   }
@@ -253,6 +280,18 @@ export class CieloApp extends HTMLElement {
     this.#showLocations();
   };
 
+  #handleTemperatureChange = (event) => {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+
+    const { municipalityId, celsius } = /** @type {TemperatureChangeDetail} */ (
+      event.detail
+    );
+    this.#locationsView?.setTemperature(municipalityId, celsius);
+    this.#municipalityView?.setTemperature(municipalityId, celsius);
+  };
+
   #showLocations() {
     if (this.#selectedId === null) {
       this.#locationsView?.removeAttribute("inert");
@@ -275,6 +314,7 @@ export class CieloApp extends HTMLElement {
     }
 
     saveTrackedMunicipalityIds(this.#trackedIds);
+    this.#temperatures.setTrackedIds(this.#trackedIds);
     if (this.#lastOpenedId === municipalityId) {
       this.#lastOpenedId = null;
       saveLastOpenedMunicipalityId(null);

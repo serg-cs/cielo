@@ -7,6 +7,7 @@ const screenDismissVelocity = 0.5;
 
 export class CieloMunicipalityView extends HTMLElement {
   #municipality = null;
+  #temperature = null;
   #hiding = false;
   #edgeDismiss = false;
   #transitionToken = 0;
@@ -43,8 +44,8 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#cancelPendingTransition();
   }
 
-  /** @param {Municipality} municipality */
-  show(municipality) {
+  /** @param {Municipality} municipality @param {number | null} temperature */
+  show(municipality, temperature) {
     const screen = this.#screen;
     const title = this.#title;
     const titleText = this.#titleText;
@@ -55,6 +56,7 @@ export class CieloMunicipalityView extends HTMLElement {
     // Replace any superseded edge transition before showing the next screen.
     this.#cancelPendingTransition();
     this.#municipality = municipality;
+    this.#temperature = temperature;
     this.#hiding = false;
     this.#edgeDismiss = false;
     this.#transitionToken += 1;
@@ -63,6 +65,7 @@ export class CieloMunicipalityView extends HTMLElement {
       "aria-label",
       `Cambiar ubicación. Ubicación actual: ${municipality.name}, ${municipality.province}`,
     );
+    this.#renderTemperature();
     this.hidden = false;
     screen.dataset.dragging = "false";
     screen.dataset.edgeDismiss = "false";
@@ -127,6 +130,7 @@ export class CieloMunicipalityView extends HTMLElement {
 
     this.hidden = true;
     this.#municipality = null;
+    this.#temperature = null;
     this.#hiding = false;
     screen.style.setProperty("--screen-offset-x", "0px");
     screen.dataset.edgeDismiss = "false";
@@ -138,6 +142,16 @@ export class CieloMunicipalityView extends HTMLElement {
         detail: { municipalityId },
       }),
     );
+  }
+
+  /** @param {string} municipalityId @param {number | null} temperature */
+  setTemperature(municipalityId, temperature) {
+    if (this.#municipality?.id !== municipalityId) {
+      return;
+    }
+
+    this.#temperature = temperature;
+    this.#renderTemperature();
   }
 
   /** @param {{edgeSwipe?: boolean}} [options] */
@@ -299,6 +313,23 @@ export class CieloMunicipalityView extends HTMLElement {
 
   #focusScreen() {
     this.#screen?.focus({ preventScroll: true });
+  }
+
+  #renderTemperature() {
+    const value = this.shadowRoot?.querySelector("#current-temperature-value");
+    const announcement = this.shadowRoot?.querySelector(
+      "#current-temperature-announcement",
+    );
+    if (!(value instanceof HTMLElement) || !(announcement instanceof HTMLElement)) {
+      return;
+    }
+
+    value.textContent = this.#temperature === null
+      ? "—"
+      : `${this.#temperature}°`;
+    announcement.textContent = this.#temperature === null
+      ? "Temperatura actual no disponible"
+      : `Temperatura actual: ${this.#temperature} grados Celsius`;
   }
 
   #cancelPendingTransition() {
@@ -481,6 +512,15 @@ export class CieloMunicipalityView extends HTMLElement {
           overflow-wrap: anywhere;
         }
 
+        .current-temperature {
+          margin: 0.55rem 0 0 0.9rem;
+          font-size: clamp(6rem, 30vw, 10rem);
+          font-variant-numeric: tabular-nums;
+          font-weight: 300;
+          letter-spacing: -0.075em;
+          line-height: 0.9;
+        }
+
         @media (min-width: 48rem) {
           .header {
             padding-top: calc(1.25rem + env(safe-area-inset-top));
@@ -520,6 +560,12 @@ export class CieloMunicipalityView extends HTMLElement {
               </button>
             </h1>
           </div>
+          <p class="current-temperature" role="status" aria-live="polite" aria-atomic="true">
+            <span id="current-temperature-value" aria-hidden="true">—</span>
+            <span id="current-temperature-announcement" class="visually-hidden">
+              Temperatura actual no disponible
+            </span>
+          </p>
           <p id="municipality-instructions" class="visually-hidden">
             Pulsa la lista o el nombre para elegir otra ubicación. También puedes deslizar hacia la derecha desde el borde izquierdo o usar Atrás.
           </p>

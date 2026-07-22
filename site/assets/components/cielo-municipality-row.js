@@ -13,6 +13,7 @@ export class CieloMunicipalityRow extends HTMLElement {
   #municipality = null;
   #mode = "saved";
   #tracked = false;
+  #temperature = null;
   #gesture = {
     pointerId: null,
     startX: 0,
@@ -56,6 +57,12 @@ export class CieloMunicipalityRow extends HTMLElement {
   set tracked(value) {
     this.#tracked = value;
     this.#render();
+  }
+
+  /** @param {number | null} value */
+  set temperature(value) {
+    this.#temperature = value;
+    this.#renderTemperature();
   }
 
   get actionOpen() {
@@ -283,9 +290,7 @@ export class CieloMunicipalityRow extends HTMLElement {
 
     const municipality = this.#municipality;
     const isSavedRow = this.#mode === "saved";
-    const actionLabel = this.#tracked
-      ? `Abrir ${municipality.name}, ${municipality.province}`
-      : `Guardar y abrir ${municipality.name}, ${municipality.province}`;
+    const actionLabel = this.#actionLabel;
 
     this.dataset.actionOpen = "false";
     this.dataset.dragging = "false";
@@ -355,6 +360,16 @@ export class CieloMunicipalityRow extends HTMLElement {
           flex: 1 1 auto;
           min-width: 0;
           overflow: hidden;
+        }
+
+        .temperature {
+          flex: 0 0 auto;
+          margin-left: var(--cielo-space-3);
+          font-size: clamp(1.65rem, 7vw, 2rem);
+          font-variant-numeric: tabular-nums;
+          font-weight: 540;
+          letter-spacing: -0.045em;
+          line-height: 1;
         }
 
         .name,
@@ -447,6 +462,7 @@ export class CieloMunicipalityRow extends HTMLElement {
             <span class="name"></span>
             <span class="province"></span>
           </span>
+          ${isSavedRow ? '<span class="temperature" aria-hidden="true">—</span>' : ""}
         </button>
         ${
           isSavedRow
@@ -464,7 +480,43 @@ export class CieloMunicipalityRow extends HTMLElement {
       name.textContent = municipality.name;
       province.textContent = municipality.province;
     }
+    this.#renderTemperature();
   }
+
+  #renderTemperature() {
+    if (this.shadowRoot === null || this.#municipality === null) {
+      return;
+    }
+
+    const temperature = this.shadowRoot.querySelector(".temperature");
+    if (temperature !== null) {
+      temperature.textContent = formatTemperature(this.#temperature);
+    }
+    this.shadowRoot
+      .querySelector(".open-button")
+      ?.setAttribute("aria-label", this.#actionLabel);
+  }
+
+  get #actionLabel() {
+    if (this.#municipality === null) {
+      return "";
+    }
+
+    const municipality = this.#municipality;
+    const action = this.#tracked
+      ? `Abrir ${municipality.name}, ${municipality.province}`
+      : `Guardar y abrir ${municipality.name}, ${municipality.province}`;
+    if (this.#mode !== "saved" || this.#temperature === null) {
+      return action;
+    }
+
+    return `${action}. Temperatura actual: ${this.#temperature} grados Celsius`;
+  }
+}
+
+/** @param {number | null} celsius */
+function formatTemperature(celsius) {
+  return celsius === null ? "—" : `${celsius}°`;
 }
 
 /** @param {string} value */
