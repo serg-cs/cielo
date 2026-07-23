@@ -91,7 +91,7 @@ fn parses_and_orders_forecast_temperatures() {
                 date: "2026-07-20".to_owned(),
                 hour: 0,
                 celsius: 21,
-                state: SkyState::CloudRain,
+                state: SkyState::CloudDrizzle,
                 description: "Lluvia débil".to_owned(),
             },
         ]
@@ -133,7 +133,7 @@ fn maps_every_supported_aemet_condition_code() {
         (
             SkyState::CloudDrizzle,
             "cloud-drizzle",
-            &["44", "45", "45n", "46", "46n"],
+            &["24", "24n", "25", "26"],
         ),
         (
             SkyState::CloudFog,
@@ -148,7 +148,11 @@ fn maps_every_supported_aemet_condition_code() {
                 "63n", "64", "64n",
             ],
         ),
-        (SkyState::CloudMoon, "cloud-moon", &["13n", "14n", "17n"]),
+        (
+            SkyState::CloudMoon,
+            "cloud-moon",
+            &["12n", "13n", "14n", "17n"],
+        ),
         (
             SkyState::CloudMoonRain,
             "cloud-moon-rain",
@@ -157,25 +161,23 @@ fn maps_every_supported_aemet_condition_code() {
         (
             SkyState::CloudRain,
             "cloud-rain",
-            &["24", "24n", "25", "26"],
+            &["44", "45", "45n", "46", "46n"],
         ),
         (
             SkyState::CloudSnow,
             "cloud-snow",
-            &[
-                "35n", "36n", "71", "71n", "72", "72n", "73", "73n", "74", "74n",
-            ],
+            &["33", "33n", "34", "34n", "35", "35n", "36", "36n"],
         ),
-        (SkyState::CloudSun, "cloud-sun", &["13", "17"]),
+        (SkyState::CloudSun, "cloud-sun", &["12", "13", "17"]),
         (SkyState::CloudSunRain, "cloud-sun-rain", &["23", "43"]),
         (SkyState::Cloudy, "cloudy", &["15", "15n", "16", "16n"]),
-        (SkyState::Moon, "moon", &["11n", "12n"]),
+        (SkyState::Moon, "moon", &["11n"]),
         (
             SkyState::Snowflake,
             "snowflake",
-            &["33", "33n", "34", "34n", "35", "36"],
+            &["71", "71n", "72", "72n", "73", "73n", "74", "74n"],
         ),
-        (SkyState::Sun, "sun", &["11", "12"]),
+        (SkyState::Sun, "sun", &["11"]),
     ];
 
     let mut mapped_code_count = 0;
