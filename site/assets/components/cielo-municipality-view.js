@@ -6,11 +6,13 @@ const screenDismissVelocity = 0.5;
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
 /** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 /** @typedef {import("../lib/weather.js").HourlyForecastPeriod} HourlyForecastPeriod */
+/** @typedef {import("../lib/weather.js").ForecastStatus} ForecastStatus */
 
 export class CieloMunicipalityView extends HTMLElement {
   #municipality = null;
   #currentForecast = null;
   #hourlyForecast = [];
+  #forecastStatus = "loading";
   #hiding = false;
   #edgeDismiss = false;
   #transitionToken = 0;
@@ -51,8 +53,9 @@ export class CieloMunicipalityView extends HTMLElement {
    * @param {Municipality} municipality
    * @param {CurrentForecast | null} currentForecast
    * @param {HourlyForecastPeriod[]} hourlyForecast
+   * @param {ForecastStatus} forecastStatus
    */
-  show(municipality, currentForecast, hourlyForecast) {
+  show(municipality, currentForecast, hourlyForecast, forecastStatus) {
     const screen = this.#screen;
     const title = this.#title;
     const titleText = this.#titleText;
@@ -65,6 +68,7 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#municipality = municipality;
     this.#currentForecast = currentForecast;
     this.#hourlyForecast = hourlyForecast;
+    this.#forecastStatus = forecastStatus;
     this.#hiding = false;
     this.#edgeDismiss = false;
     this.#transitionToken += 1;
@@ -144,6 +148,7 @@ export class CieloMunicipalityView extends HTMLElement {
     this.#municipality = null;
     this.#currentForecast = null;
     this.#hourlyForecast = [];
+    this.#forecastStatus = "loading";
     this.#hiding = false;
     screen.style.setProperty("--screen-offset-x", "0px");
     screen.dataset.edgeDismiss = "false";
@@ -178,6 +183,17 @@ export class CieloMunicipalityView extends HTMLElement {
 
     this.#hourlyForecast = hourlyForecast;
     this.#renderHourlyForecast();
+    this.#renderCurrentForecast();
+  }
+
+  /** @param {string} municipalityId @param {ForecastStatus} forecastStatus */
+  setForecastStatus(municipalityId, forecastStatus) {
+    if (this.#municipality?.id !== municipalityId) {
+      return;
+    }
+
+    this.#forecastStatus = forecastStatus;
+    this.#renderCurrentForecast();
   }
 
   /** @param {{edgeSwipe?: boolean}} [options] */
@@ -352,29 +368,38 @@ export class CieloMunicipalityView extends HTMLElement {
     const announcement = this.shadowRoot?.querySelector(
       "#current-temperature-announcement",
     );
+    const reading = this.shadowRoot?.querySelector(".current-reading");
+    const message = this.shadowRoot?.querySelector("#current-forecast-message");
     if (
       !(conditionIcon instanceof HTMLElement) ||
       !(value instanceof HTMLElement) ||
       !(description instanceof HTMLElement) ||
-      !(announcement instanceof HTMLElement)
+      !(announcement instanceof HTMLElement) ||
+      !(reading instanceof HTMLElement) ||
+      !(message instanceof HTMLElement)
     ) {
       return;
     }
 
-    conditionIcon.hidden = this.#currentForecast === null;
-    description.hidden = this.#currentForecast === null;
+    const hasCurrentForecast = this.#currentForecast !== null;
+    reading.hidden = !hasCurrentForecast;
+    conditionIcon.hidden = !hasCurrentForecast;
+    description.hidden = !hasCurrentForecast;
+    message.hidden = hasCurrentForecast;
     if (this.#currentForecast === null) {
       conditionIcon.removeAttribute("name");
       description.textContent = "";
+      message.textContent = this.#forecastStatusMessage;
     } else {
       conditionIcon.setAttribute("name", this.#currentForecast.state);
       description.textContent = this.#currentForecast.description;
+      message.textContent = "";
     }
     value.textContent = this.#currentForecast === null
-      ? "—"
+      ? ""
       : `${this.#currentForecast.celsius}°`;
     announcement.textContent = this.#currentForecast === null
-      ? "Temperatura actual no disponible"
+      ? ""
       : `Temperatura actual: ${this.#currentForecast.celsius} grados Celsius`;
   }
 
@@ -385,8 +410,8 @@ export class CieloMunicipalityView extends HTMLElement {
       return;
     }
 
-    // Keep the timeline out of the reading order until forecast data is ready.
-    section.hidden = this.#hourlyForecast.length === 0;
+    // Keep an empty timeline out of the visual and accessibility trees.
+    section.hidden = !this.#hasHourlyForecast;
     const periods = this.#hourlyForecast.map((period, index) => {
       const item = document.createElement("li");
       const hour = document.createElement("span");
@@ -417,6 +442,25 @@ export class CieloMunicipalityView extends HTMLElement {
       return item;
     });
     list.replaceChildren(...periods);
+  }
+
+  get #hasHourlyForecast() {
+    return this.#hourlyForecast.some((period) => period.forecast !== null);
+  }
+
+  get #forecastStatusMessage() {
+    if (this.#forecastStatus === "loading") {
+      return "Cargando previsión…";
+    }
+    if (this.#forecastStatus === "offline") {
+      return "Sin conexión a Internet";
+    }
+    if (this.#forecastStatus === "error") {
+      return "No se pudo cargar la previsión";
+    }
+    return this.#hasHourlyForecast
+      ? "Temperatura actual no disponible"
+      : "Previsión no disponible";
   }
 
   #cancelPendingTransition() {
@@ -614,6 +658,10 @@ export class CieloMunicipalityView extends HTMLElement {
           align-items: center;
         }
 
+        .current-reading[hidden] {
+          display: none;
+        }
+
         .current-condition-icon {
           width: clamp(4.5rem, 18vw, 6.5rem);
           height: clamp(4.5rem, 18vw, 6.5rem);
@@ -652,6 +700,19 @@ export class CieloMunicipalityView extends HTMLElement {
           display: none;
         }
 
+        .current-forecast-message {
+          display: block;
+          padding: 2.2rem 0.9rem;
+          color: var(--cielo-color-muted);
+          font-size: var(--cielo-font-size-small);
+          line-height: 1.4;
+          text-align: center;
+        }
+
+        .current-forecast-message[hidden] {
+          display: none;
+        }
+
         .hourly-forecast {
           position: fixed;
           bottom: calc(1.9rem + env(safe-area-inset-bottom));
@@ -674,9 +735,13 @@ export class CieloMunicipalityView extends HTMLElement {
           outline: none;
           outline-offset: -0.2rem;
           overscroll-behavior-x: contain;
-          scrollbar-width: thin;
+          scrollbar-width: none;
           scroll-snap-type: x proximity;
           -webkit-overflow-scrolling: touch;
+        }
+
+        .hourly-scroll::-webkit-scrollbar {
+          display: none;
         }
 
         .hourly-scroll:focus-visible {
@@ -738,6 +803,60 @@ export class CieloMunicipalityView extends HTMLElement {
           }
         }
 
+        @media (hover: hover) and (pointer: fine) {
+          .locations-button:hover,
+          .location-switcher:hover {
+            background: var(--cielo-color-surface);
+          }
+        }
+
+        /* Preserve the mobile reading order while fitting short landscape views. */
+        @media (orientation: landscape) and (max-height: 34rem) {
+          .screen {
+            overflow-y: auto;
+          }
+
+          .header {
+            display: flex;
+            flex-direction: column;
+            min-height: 100%;
+            padding:
+              calc(0.8rem + env(safe-area-inset-top))
+              max(var(--cielo-space-4), env(safe-area-inset-right))
+              max(0.8rem, env(safe-area-inset-bottom))
+              max(var(--cielo-space-4), env(safe-area-inset-left));
+          }
+
+          .current-forecast {
+            margin-top: 0;
+          }
+
+          .current-condition-icon {
+            width: clamp(3.5rem, 18vh, 4.75rem);
+            height: clamp(3.5rem, 18vh, 4.75rem);
+          }
+
+          #current-temperature-value {
+            font-size: clamp(4.75rem, 26vh, 7rem);
+          }
+
+          .current-condition-description {
+            font-size: clamp(0.9rem, 3.8vh, 1.05rem);
+          }
+
+          .current-forecast-message {
+            padding: 0.9rem 0.5rem;
+          }
+
+          .hourly-forecast {
+            position: static;
+            width: calc(100% - 1.8rem);
+            padding-top: 1rem;
+            margin: auto auto 0;
+            transform: none;
+          }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .screen {
             transition-duration: 1ms;
@@ -788,6 +907,12 @@ export class CieloMunicipalityView extends HTMLElement {
             <span id="current-temperature-announcement" class="visually-hidden">
               Temperatura actual no disponible
             </span>
+            <span
+              id="current-forecast-message"
+              class="current-forecast-message"
+            >
+              Cargando previsión…
+            </span>
           </div>
           <section id="hourly-forecast" class="hourly-forecast" hidden>
             <h2 id="hourly-forecast-title" class="visually-hidden">
@@ -812,7 +937,9 @@ export class CieloMunicipalityView extends HTMLElement {
 
 /** @param {HourlyForecastPeriod} period @param {boolean} isCurrent */
 function formatHourlyForecastLabel(period, isCurrent) {
-  const hourLabel = isCurrent ? "Ahora" : `${period.hour} horas`;
+  const hourLabel = isCurrent
+    ? "Ahora"
+    : `${period.hour} ${period.hour === 1 ? "hora" : "horas"}`;
   if (period.forecast === null) {
     return `${hourLabel}. Previsión no disponible`;
   }

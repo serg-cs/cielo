@@ -562,6 +562,17 @@ export class CieloMunicipalityRow extends HTMLElement {
           height: 1.3rem;
         }
 
+        @media (hover: hover) and (pointer: fine) {
+          .open-button:hover {
+            border-color: rgb(252 252 250 / 30%);
+            background: var(--cielo-color-surface);
+          }
+
+          .remove-button:hover {
+            filter: brightness(1.08);
+          }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .open-button.saved,
           .remove-button {

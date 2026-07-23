@@ -8,6 +8,8 @@ import {
   CieloMunicipalityRow,
 } from "./cielo-municipality-row.js";
 
+const maximumSearchResults = 50;
+
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
 /** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 
@@ -60,25 +62,50 @@ export class CieloLocationsView extends HTMLElement {
     }
     this.#setLoadStatus("");
     this.#renderContent();
+    if (this.#catalogRetryButton === this.shadowRoot?.activeElement) {
+      this.#focusSavedContent();
+    }
+    this.#setCatalogRetryState(false);
   }
 
-  showError() {
+  showLoading() {
     this.#ready = false;
     const input = this.#searchInput;
     if (input !== null) {
       input.disabled = true;
     }
-    this.#setLoadStatus("No se pudieron cargar los municipios", true);
+    this.#setLoadStatus("Cargando municipios…");
+    const retryVisible = this.#catalogRetryButton?.hidden === false;
+    this.#setCatalogRetryState(retryVisible, retryVisible);
+    this.#renderContent();
+  }
+
+  /** @param {string} message */
+  showError(message) {
+    this.#ready = false;
+    const input = this.#searchInput;
+    if (input !== null) {
+      input.disabled = true;
+    }
+    this.#setLoadStatus(message, true);
+    this.#setCatalogRetryState(true);
     this.#renderContent();
   }
 
   clearSearch() {
-    if (this.#searchInput !== null) {
-      this.#searchInput.value = "";
-      this.#searchInput.blur();
+    const input = this.#searchInput;
+    const activeElement = this.shadowRoot?.activeElement;
+    const shouldRestoreFocus = activeElement === input ||
+      activeElement === this.#clearSearchButton;
+    if (input !== null) {
+      input.value = "";
+      input.blur();
     }
     this.#searchActive = false;
     this.#renderContent();
+    if (shouldRestoreFocus) {
+      this.#focusSavedContent();
+    }
   }
 
   /** @param {string} municipalityId */
@@ -141,6 +168,18 @@ export class CieloLocationsView extends HTMLElement {
     return input instanceof HTMLInputElement ? input : null;
   }
 
+  /** @returns {HTMLButtonElement | null} */
+  get #clearSearchButton() {
+    const button = this.shadowRoot?.querySelector("#clear-search");
+    return button instanceof HTMLButtonElement ? button : null;
+  }
+
+  /** @returns {HTMLButtonElement | null} */
+  get #catalogRetryButton() {
+    const button = this.shadowRoot?.querySelector("#catalog-retry");
+    return button instanceof HTMLButtonElement ? button : null;
+  }
+
   /** @returns {CieloMunicipalityRow[]} */
   get #savedRows() {
     if (this.shadowRoot === null) {
@@ -193,6 +232,20 @@ export class CieloLocationsView extends HTMLElement {
         this.#searchActive = true;
         this.#renderContent();
         this.#searchInput?.focus({ preventScroll: false });
+        return;
+      }
+
+      const catalogRetry = event.target.closest("#catalog-retry");
+      if (
+        catalogRetry instanceof HTMLButtonElement &&
+        catalogRetry.getAttribute("aria-disabled") !== "true"
+      ) {
+        this.dispatchEvent(
+          new CustomEvent("catalog-retry", {
+            bubbles: true,
+            composed: true,
+          }),
+        );
       }
     });
     this.addEventListener("scroll", () => {
@@ -467,10 +520,11 @@ export class CieloLocationsView extends HTMLElement {
         }
 
         .search-header {
-          position: relative;
+          position: sticky;
           z-index: 5;
+          top: 0;
           padding: calc(0.8rem + env(safe-area-inset-top)) var(--cielo-space-4) 0.8rem;
-          background: transparent;
+          background: var(--cielo-color-locations-background);
         }
 
         .search-row {
@@ -502,7 +556,7 @@ export class CieloLocationsView extends HTMLElement {
         input {
           width: 100%;
           min-height: 3rem;
-          padding: 0.7rem 2.8rem 0.7rem 2.65rem;
+          padding: 0.7rem 3.35rem 0.7rem 2.65rem;
           border: 1px solid var(--cielo-color-border);
           border-radius: var(--cielo-radius-control);
           outline: none;
@@ -537,10 +591,10 @@ export class CieloLocationsView extends HTMLElement {
         .clear-search-button {
           position: absolute;
           top: 50%;
-          right: 0.35rem;
+          right: 0;
           display: grid;
-          width: 2.3rem;
-          height: 2.3rem;
+          width: var(--cielo-touch-target);
+          height: var(--cielo-touch-target);
           padding: 0;
           border: 0;
           border-radius: 50%;
@@ -559,7 +613,8 @@ export class CieloLocationsView extends HTMLElement {
         }
 
         .clear-search-button:focus-visible,
-        .empty-search-button:focus-visible {
+        .empty-search-button:focus-visible,
+        .catalog-retry-button:focus-visible {
           outline: var(--cielo-focus-outline);
         }
 
@@ -582,6 +637,26 @@ export class CieloLocationsView extends HTMLElement {
           font-size: var(--cielo-font-size-small);
           line-height: 1.4;
           text-align: center;
+        }
+
+        .catalog-retry-button {
+          align-self: center;
+          min-height: var(--cielo-touch-target);
+          padding: 0.6rem 1rem;
+          border: 1px solid var(--cielo-color-border);
+          border-radius: var(--cielo-radius-pill);
+          outline: none;
+          outline-offset: 0.15rem;
+          color: var(--cielo-color-text);
+          background: transparent;
+          font-weight: 650;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .catalog-retry-button[aria-disabled="true"] {
+          cursor: wait;
+          opacity: 0.58;
         }
 
         .list {
@@ -616,45 +691,37 @@ export class CieloLocationsView extends HTMLElement {
         }
 
         .empty-state {
-          overflow: hidden;
-          border: 1px solid var(--cielo-color-border);
-          border-radius: var(--cielo-radius-control);
-          background: transparent;
+          display: grid;
+          justify-items: center;
+          gap: var(--cielo-space-3);
+          min-height: 18rem;
+          padding: clamp(2.5rem, 8vh, 4.5rem) 1.35rem;
+          color: var(--cielo-color-muted);
+          text-align: center;
+          align-content: center;
         }
 
         .list:empty {
           display: none;
         }
 
-        .empty-state {
-          display: grid;
-          justify-items: center;
-          gap: var(--cielo-space-3);
-          min-height: 16rem;
-          padding: 2.4rem 1.35rem;
-          color: var(--cielo-color-muted);
-          text-align: center;
-          align-content: center;
-        }
-
         .empty-state-icon {
-          width: 3.4rem;
-          height: 3.4rem;
-          padding: 0.75rem;
-          border: 1px solid var(--cielo-color-border);
+          width: 3.25rem;
+          height: 3.25rem;
+          padding: 0.8rem;
           border-radius: 50%;
           color: var(--cielo-color-accent);
           background: var(--cielo-color-surface);
         }
 
-        .empty-state h3,
+        .empty-state h2,
         .empty-state p {
           margin: 0;
         }
 
-        .empty-state h3 {
+        .empty-state h2 {
           color: var(--cielo-color-text);
-          font-size: 1.15rem;
+          font-size: 1.2rem;
           line-height: 1.25;
         }
 
@@ -677,6 +744,15 @@ export class CieloLocationsView extends HTMLElement {
           -webkit-tap-highlight-color: transparent;
         }
 
+        .search-overflow-status {
+          margin: 0;
+          padding: 1rem 0 0.25rem;
+          color: var(--cielo-color-muted);
+          font-size: 0.8rem;
+          line-height: 1.4;
+          text-align: center;
+        }
+
         .source-attribution {
           margin: auto 0 0;
           padding-top: 1.5rem;
@@ -688,6 +764,55 @@ export class CieloLocationsView extends HTMLElement {
 
         button:active {
           opacity: 0.78;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+          input:hover {
+            border-color: rgb(252 252 250 / 30%);
+          }
+
+          .clear-search-button:hover {
+            color: var(--cielo-color-text);
+            background: var(--cielo-color-surface);
+          }
+
+          .empty-search-button:hover,
+          .catalog-retry-button:hover {
+            filter: brightness(1.08);
+          }
+        }
+
+        @media (orientation: landscape) and (max-height: 34rem) {
+          .empty-state {
+            grid-template:
+              "icon title action" auto
+              "icon copy action" auto
+              / auto minmax(0, 1fr) auto;
+            min-height: 0;
+            padding: 1.25rem 0.5rem;
+            column-gap: var(--cielo-space-4);
+            row-gap: var(--cielo-space-1);
+            justify-items: start;
+            text-align: left;
+          }
+
+          .empty-state-icon {
+            grid-area: icon;
+            align-self: center;
+          }
+
+          .empty-state h2 {
+            grid-area: title;
+          }
+
+          .empty-state p {
+            grid-area: copy;
+          }
+
+          .empty-search-button {
+            grid-area: action;
+            align-self: center;
+          }
         }
 
         @media (min-width: 48rem) {
@@ -730,6 +855,7 @@ export class CieloLocationsView extends HTMLElement {
               class="clear-search-button"
               type="button"
               aria-label="Cerrar búsqueda"
+              hidden
             >
               <cielo-icon name="circle-x"></cielo-icon>
             </button>
@@ -738,10 +864,18 @@ export class CieloLocationsView extends HTMLElement {
       </header>
       <div class="content">
         <p id="load-status" class="status" role="status">Cargando municipios…</p>
+        <button
+          id="catalog-retry"
+          class="catalog-retry-button"
+          type="button"
+          hidden
+        >
+          Reintentar
+        </button>
         <section id="saved-section" aria-label="Mis ubicaciones">
           <div id="empty-guidance" class="empty-state" hidden>
             <cielo-icon class="empty-state-icon" name="map-pin"></cielo-icon>
-            <h3>Añade tu primera ubicación</h3>
+            <h2>Añade tu primera ubicación</h2>
             <p>
               Busca un municipio para consultarlo y tenerlo siempre a mano.
             </p>
@@ -754,6 +888,11 @@ export class CieloLocationsView extends HTMLElement {
         <section id="results-section" aria-label="Resultados" hidden>
           <p id="search-status" class="status" role="status" hidden></p>
           <div id="results-list" class="list" role="list" aria-label="Resultados"></div>
+          <p
+            id="search-overflow-status"
+            class="search-overflow-status"
+            hidden
+          ></p>
         </section>
         <p class="source-attribution">Fuente: AEMET</p>
       </div>
@@ -768,9 +907,11 @@ export class CieloLocationsView extends HTMLElement {
     const query = normalizeSearchText(this.#searchInput?.value ?? "");
     const savedSection = this.shadowRoot.querySelector("#saved-section");
     const resultsSection = this.shadowRoot.querySelector("#results-section");
+    const clearSearch = this.shadowRoot.querySelector("#clear-search");
     if (
       !(savedSection instanceof HTMLElement) ||
-      !(resultsSection instanceof HTMLElement)
+      !(resultsSection instanceof HTMLElement) ||
+      !(clearSearch instanceof HTMLButtonElement)
     ) {
       return;
     }
@@ -778,6 +919,7 @@ export class CieloLocationsView extends HTMLElement {
     // Keep search mode explicit so clearing text does not dismiss it.
     savedSection.hidden = this.#searchActive;
     resultsSection.hidden = !this.#searchActive;
+    clearSearch.hidden = !this.#searchActive;
     if (this.#searchActive) {
       this.closeSwipeRows();
       this.#renderResults(query);
@@ -817,19 +959,31 @@ export class CieloLocationsView extends HTMLElement {
 
     const list = this.shadowRoot.querySelector("#results-list");
     const status = this.shadowRoot.querySelector("#search-status");
-    if (!(list instanceof HTMLElement) || !(status instanceof HTMLElement)) {
+    const overflowStatus = this.shadowRoot.querySelector(
+      "#search-overflow-status",
+    );
+    if (
+      !(list instanceof HTMLElement) ||
+      !(status instanceof HTMLElement) ||
+      !(overflowStatus instanceof HTMLElement)
+    ) {
       return;
     }
 
     if (!this.#ready || query.length < minimumSearchLength) {
       list.replaceChildren();
-      this.#setSearchStatus("");
+      this.#setSearchStatus(
+        this.#ready && query.length === 1
+          ? "Escribe al menos 2 caracteres"
+          : "",
+      );
+      this.#setSearchOverflowStatus("");
       return;
     }
 
     const municipalities = searchMunicipalities(this.#catalog, query);
     list.replaceChildren(
-      ...municipalities.map((municipality) =>
+      ...municipalities.slice(0, maximumSearchResults).map((municipality) =>
         this.#createRow(municipality, "result"),
       ),
     );
@@ -839,6 +993,11 @@ export class CieloLocationsView extends HTMLElement {
     } else {
       this.#setSearchStatus("");
     }
+    this.#setSearchOverflowStatus(
+      municipalities.length > maximumSearchResults
+        ? `Mostrando ${maximumSearchResults} de ${municipalities.length} resultados`
+        : "",
+    );
   }
 
   /** @param {Municipality} municipality @param {"saved" | "result"} mode */
@@ -867,6 +1026,48 @@ export class CieloLocationsView extends HTMLElement {
 
     status.textContent = message;
     status.hidden = message.length === 0;
+  }
+
+  /** @param {string} message */
+  #setSearchOverflowStatus(message) {
+    const status = this.shadowRoot?.querySelector("#search-overflow-status");
+    if (!(status instanceof HTMLElement)) {
+      return;
+    }
+
+    status.textContent = message;
+    status.hidden = message.length === 0;
+  }
+
+  #focusSavedContent() {
+    const row = this.#savedRows[0];
+    if (row !== undefined) {
+      row.focusOpenButton({ preventScroll: true });
+      return;
+    }
+
+    const emptySearch = this.shadowRoot?.querySelector("#empty-search");
+    if (emptySearch instanceof HTMLButtonElement && !emptySearch.hidden) {
+      emptySearch.focus({ preventScroll: true });
+      return;
+    }
+
+    this.#searchInput?.focus({ preventScroll: true });
+  }
+
+  /** @param {boolean} visible @param {boolean} [disabled] */
+  #setCatalogRetryState(visible, disabled = false) {
+    const button = this.#catalogRetryButton;
+    if (button === null) {
+      return;
+    }
+
+    button.hidden = !visible;
+    if (disabled) {
+      button.setAttribute("aria-disabled", "true");
+    } else {
+      button.removeAttribute("aria-disabled");
+    }
   }
 
   /** @param {string} message @param {boolean} [alert] */

@@ -156,7 +156,7 @@ fn publishes_complete_static_site() {
     let manifest: Value = serde_json::from_str(&manifest_text).expect("manifest should be JSON");
     assert_eq!(manifest["name"], "Cielo");
     assert_eq!(manifest["display"], "standalone");
-    assert_eq!(manifest["orientation"], "portrait");
+    assert_eq!(manifest["orientation"], "any");
     assert!(output_dir.join("icon.svg").is_file());
     for icon in [
         "assets/app-icons/apple-touch-icon.png",
@@ -265,12 +265,13 @@ fn assert_complete_icon_assets(output_dir: &Path, service_worker: &str) {
     assert_eq!(icon_component.matches("  [\"").count(), 19);
 
     // Preserve semantic weather colors when embedding the canonical SVGs.
-    for color in ["#fcfcfa", "#ffd866", "#78dce8", "#d2dfe8"] {
+    for color in ["#fcfcfa", "#ffd866", "#78dce8"] {
         assert!(
             icon_component.contains(color),
             "icon component is missing weather color {color}"
         );
     }
+    assert!(!icon_component.contains("#d2dfe8"));
     assert!(output_dir.join("assets/icons/LICENSE").is_file());
 }
 

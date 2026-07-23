@@ -55,6 +55,12 @@ const catalogUrl = new URL("../../data/municipalities.json", import.meta.url);
  */
 
 /**
+ * @typedef {object} ForecastStatusChangeDetail
+ * @property {string} municipalityId
+ * @property {import("../lib/weather.js").ForecastStatus} status
+ */
+
+/**
  * @typedef {{view: "locations"} | {view: "municipality", municipalityId: string}} NavigationState
  */
 
@@ -65,6 +71,8 @@ export class CieloApp extends HTMLElement {
   #selectedId = null;
   #lastOpenedId = null;
   #initialized = false;
+  #catalogLoadInFlight = false;
+  #catalogLoadFailed = false;
   #currentForecasts = new CurrentForecastStore();
 
   constructor() {
@@ -75,9 +83,13 @@ export class CieloApp extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("popstate", this.#handlePopState);
+    window.addEventListener("online", this.#handleOnline);
+    window.addEventListener("offline", this.#handleOffline);
     if (this.#initialized) {
       if (this.#municipalities.length > 0) {
         this.#currentForecasts.start(this.#municipalities, this.#trackedIds);
+      } else {
+        void this.#initialize();
       }
       return;
     }
@@ -89,6 +101,8 @@ export class CieloApp extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("popstate", this.#handlePopState);
+    window.removeEventListener("online", this.#handleOnline);
+    window.removeEventListener("offline", this.#handleOffline);
     this.#currentForecasts.stop();
   }
 
@@ -142,6 +156,9 @@ export class CieloApp extends HTMLElement {
         /** @type {MunicipalityIdentityDetail} */ (event.detail).municipalityId,
       );
     });
+    this.shadowRoot?.addEventListener("catalog-retry", () => {
+      void this.#initialize();
+    });
     this.#currentForecasts.addEventListener(
       "currentforecastchange",
       this.#handleCurrentForecastChange,
@@ -150,14 +167,24 @@ export class CieloApp extends HTMLElement {
       "hourlyforecastchange",
       this.#handleHourlyForecastChange,
     );
+    this.#currentForecasts.addEventListener(
+      "forecaststatuschange",
+      this.#handleForecastStatusChange,
+    );
   }
 
   async #initialize() {
     const locationsView = this.#locationsView;
-    if (locationsView === null) {
+    if (
+      locationsView === null ||
+      this.#catalogLoadInFlight ||
+      this.#municipalities.length > 0
+    ) {
       return;
     }
 
+    this.#catalogLoadInFlight = true;
+    locationsView.showLoading();
     try {
       // Render a validated on-device catalog before refreshing it for the next load.
       const cachedMunicipalities = await readValidatedJson(
@@ -177,10 +204,17 @@ export class CieloApp extends HTMLElement {
       this.#showCatalog(municipalities);
     } catch (error) {
       console.error(error);
-      locationsView.showError();
+      this.#catalogLoadFailed = true;
+      locationsView.showError(
+        navigator.onLine
+          ? "No se pudieron cargar los municipios"
+          : "Sin conexión a Internet",
+      );
       this.dataset.ready = "true";
       this.#replaceNavigationState({ view: "locations" });
       this.#setThemeColor("--cielo-color-locations-background");
+    } finally {
+      this.#catalogLoadInFlight = false;
     }
   }
 
@@ -192,6 +226,7 @@ export class CieloApp extends HTMLElement {
     }
 
     this.#municipalities = municipalities;
+    this.#catalogLoadFailed = false;
     this.#municipalitiesById = new Map(
       this.#municipalities.map((municipality) => [municipality.id, municipality]),
     );
@@ -302,6 +337,7 @@ export class CieloApp extends HTMLElement {
       municipality,
       this.#currentForecasts.getCurrentForecast(municipalityId),
       this.#currentForecasts.getHourlyForecast(municipalityId),
+      this.#currentForecasts.getForecastStatus(municipalityId),
     );
     locationsView.inert = true;
     locationsView.setAttribute("aria-hidden", "true");
@@ -360,6 +396,29 @@ export class CieloApp extends HTMLElement {
       event.detail
     );
     this.#municipalityView?.setHourlyForecast(municipalityId, forecasts);
+  };
+
+  #handleForecastStatusChange = (event) => {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+
+    const { municipalityId, status } = /** @type {ForecastStatusChangeDetail} */ (
+      event.detail
+    );
+    this.#municipalityView?.setForecastStatus(municipalityId, status);
+  };
+
+  #handleOnline = () => {
+    if (this.#catalogLoadFailed) {
+      void this.#initialize();
+    }
+  };
+
+  #handleOffline = () => {
+    if (this.#catalogLoadFailed) {
+      this.#locationsView?.showError("Sin conexión a Internet");
+    }
   };
 
   #showLocations() {
