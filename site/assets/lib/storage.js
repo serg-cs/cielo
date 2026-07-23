@@ -42,6 +42,8 @@ export function saveLastOpenedMunicipalityId(
 }
 
 /**
+ * Read saved municipality IDs in their user-defined order.
+ *
  * @param {Storage | null} [storage]
  * @returns {Set<string>}
  */
@@ -63,6 +65,8 @@ export function readTrackedMunicipalityIds(storage = null) {
 }
 
 /**
+ * Save municipality IDs in their user-defined order.
+ *
  * @param {Set<string>} trackedIds
  * @param {Storage | null} [storage]
  */

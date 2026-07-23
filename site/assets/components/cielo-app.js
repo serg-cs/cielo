@@ -37,6 +37,12 @@ const catalogUrl = new URL("../../data/municipalities.json", import.meta.url);
  */
 
 /**
+ * @typedef {object} MunicipalityReorderDetail
+ * @property {string} municipalityId
+ * @property {number} targetIndex
+ */
+
+/**
  * @typedef {object} CurrentForecastChangeDetail
  * @property {string} municipalityId
  * @property {import("../lib/weather.js").CurrentForecast | null} forecast
@@ -113,6 +119,15 @@ export class CieloApp extends HTMLElement {
 
       this.#removeMunicipality(
         /** @type {MunicipalityIdentityDetail} */ (event.detail).municipalityId,
+      );
+    });
+    this.shadowRoot?.addEventListener("municipality-reorder", (event) => {
+      if (!(event instanceof CustomEvent)) {
+        return;
+      }
+
+      this.#reorderMunicipality(
+        /** @type {MunicipalityReorderDetail} */ (event.detail),
       );
     });
     this.shadowRoot?.addEventListener("municipality-close-request", () => {
@@ -377,6 +392,31 @@ export class CieloApp extends HTMLElement {
     if (this.#locationsView !== null) {
       this.#locationsView.trackedIds = this.#trackedIds;
       this.#locationsView.focusAfterRemoval(removedIndex);
+    }
+  }
+
+  /** @param {MunicipalityReorderDetail} detail */
+  #reorderMunicipality({ municipalityId, targetIndex }) {
+    const orderedIds = [...this.#trackedIds];
+    const sourceIndex = orderedIds.indexOf(municipalityId);
+    if (
+      sourceIndex === -1 ||
+      !Number.isInteger(targetIndex) ||
+      targetIndex < 0 ||
+      targetIndex >= orderedIds.length ||
+      sourceIndex === targetIndex
+    ) {
+      return;
+    }
+
+    // Rebuild the set so its iteration order remains the persisted list order.
+    orderedIds.splice(sourceIndex, 1);
+    orderedIds.splice(targetIndex, 0, municipalityId);
+    this.#trackedIds = new Set(orderedIds);
+    saveTrackedMunicipalityIds(this.#trackedIds);
+    if (this.#locationsView !== null) {
+      this.#locationsView.trackedIds = this.#trackedIds;
+      this.#locationsView.restoreFocus(municipalityId);
     }
   }
 

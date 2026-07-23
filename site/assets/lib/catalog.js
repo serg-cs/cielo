@@ -113,6 +113,5 @@ export function searchMunicipalities(municipalities, query) {
 export function getTrackedMunicipalities(trackedIds, municipalitiesById) {
   return [...trackedIds]
     .map((id) => municipalitiesById.get(id))
-    .filter((municipality) => municipality !== undefined)
-    .sort(compareMunicipalities);
+    .filter((municipality) => municipality !== undefined);
 }

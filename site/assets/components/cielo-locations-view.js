@@ -1,5 +1,5 @@
 import {
-  compareMunicipalities,
+  getTrackedMunicipalities,
   minimumSearchLength,
   normalizeSearchText,
   searchMunicipalities,
@@ -11,12 +11,22 @@ import {
 /** @typedef {import("../lib/catalog.js").Municipality} Municipality */
 /** @typedef {import("../lib/weather.js").CurrentForecast} CurrentForecast */
 
+/**
+ * @typedef {object} MunicipalityReorderStartDetail
+ * @property {string} municipalityId
+ * @property {number} pointerId
+ * @property {number} clientY
+ */
+
 export class CieloLocationsView extends HTMLElement {
   #catalog = [];
+  #municipalitiesById = new Map();
   #trackedIds = new Set();
   #currentForecasts = new Map();
   #ready = false;
   #searchActive = false;
+  #reorder = null;
+  #autoScrollFrame = null;
 
   constructor() {
     super();
@@ -27,12 +37,17 @@ export class CieloLocationsView extends HTMLElement {
 
   /** @param {Municipality[]} value */
   set catalog(value) {
+    this.#finishReorder(true, true);
     this.#catalog = value;
+    this.#municipalitiesById = new Map(
+      value.map((municipality) => [municipality.id, municipality]),
+    );
     this.#renderContent();
   }
 
   /** @param {Set<string>} value */
   set trackedIds(value) {
+    this.#finishReorder(true, true);
     this.#trackedIds = new Set(value);
     this.#renderContent();
   }
@@ -153,6 +168,12 @@ export class CieloLocationsView extends HTMLElement {
       this.closeSwipeRows(this.#rowFromEvent(event));
     });
     this.shadowRoot?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.#reorder !== null) {
+        event.preventDefault();
+        this.#finishReorder(true, true);
+        return;
+      }
+
       if (event.target === this.#searchInput && event.key === "Escape") {
         event.preventDefault();
         this.clearSearch();
@@ -174,11 +195,221 @@ export class CieloLocationsView extends HTMLElement {
         this.#searchInput?.focus({ preventScroll: false });
       }
     });
-    this.addEventListener("scroll", () => this.closeSwipeRows(), {
+    this.addEventListener("scroll", () => {
+      if (this.#reorder === null) {
+        this.closeSwipeRows();
+      }
+    }, {
       passive: true,
     });
     this.shadowRoot?.addEventListener("pointerdown", (event) => {
       this.closeSwipeRows(this.#rowFromEvent(event));
+    });
+    this.shadowRoot?.addEventListener("municipality-reorder-start", (event) => {
+      this.#startReorder(event);
+    });
+    this.shadowRoot?.addEventListener("pointermove", (event) => {
+      this.#updateReorder(event);
+    });
+    this.shadowRoot?.addEventListener("pointerup", (event) => {
+      if (this.#reorder?.pointerId === event.pointerId) {
+        this.#finishReorder(false);
+      }
+    });
+    this.shadowRoot?.addEventListener("pointercancel", (event) => {
+      if (this.#reorder?.pointerId === event.pointerId) {
+        this.#finishReorder(true);
+      }
+    });
+    this.shadowRoot?.addEventListener("touchmove", (event) => {
+      if (this.#reorder !== null) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+    this.shadowRoot?.addEventListener("contextmenu", (event) => {
+      if (this.#reorder !== null) {
+        event.preventDefault();
+      }
+    });
+  }
+
+  /** @param {Event} event */
+  #startReorder(event) {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+
+    event.stopPropagation();
+    const detail = /** @type {MunicipalityReorderStartDetail} */ (event.detail);
+    const row = this.#rowFromEvent(event);
+    const list = this.shadowRoot?.querySelector("#saved-list");
+    const rows = this.#savedRows;
+    if (
+      row === null ||
+      !(list instanceof HTMLElement) ||
+      row.municipality?.id !== detail.municipalityId ||
+      rows.length < 2 ||
+      this.#reorder !== null
+    ) {
+      row?.cancelReordering();
+      return;
+    }
+
+    // Lift the active row while a placeholder preserves the grid geometry.
+    this.closeSwipeRows();
+    const rectangle = row.getBoundingClientRect();
+    const placeholder = document.createElement("div");
+    placeholder.className = "reorder-placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.style.height = `${rectangle.height}px`;
+    list.insertBefore(placeholder, row);
+    row.style.setProperty("--reorder-left", `${rectangle.left}px`);
+    row.style.setProperty("--reorder-top", `${rectangle.top}px`);
+    row.style.setProperty("--reorder-width", `${rectangle.width}px`);
+    row.style.setProperty("--reorder-height", `${rectangle.height}px`);
+    row.dataset.reorderActive = "true";
+    this.dataset.reordering = "true";
+    this.#reorder = {
+      municipalityId: detail.municipalityId,
+      pointerId: detail.pointerId,
+      pointerY: detail.clientY,
+      grabOffsetY: detail.clientY - rectangle.top,
+      originalIndex: rows.indexOf(row),
+      rowHeight: rectangle.height,
+      row,
+      list,
+      placeholder,
+    };
+    this.#scheduleAutoScroll();
+  }
+
+  /** @param {PointerEvent} event */
+  #updateReorder(event) {
+    const reorder = this.#reorder;
+    if (reorder === null || reorder.pointerId !== event.pointerId) {
+      return;
+    }
+
+    // Keep the lifted row under the pointer and move its target slot live.
+    event.preventDefault();
+    reorder.pointerY = event.clientY;
+    reorder.row.style.setProperty(
+      "--reorder-top",
+      `${event.clientY - reorder.grabOffsetY}px`,
+    );
+    this.#moveReorderPlaceholder();
+    this.#scheduleAutoScroll();
+  }
+
+  #moveReorderPlaceholder() {
+    const reorder = this.#reorder;
+    if (reorder === null) {
+      return;
+    }
+
+    const referenceRow = this.#savedRows
+      .filter((row) => row !== reorder.row)
+      .find((row) => {
+        const rectangle = row.getBoundingClientRect();
+        return reorder.pointerY < rectangle.top + rectangle.height / 2;
+      });
+    if (referenceRow === undefined) {
+      reorder.list.append(reorder.placeholder);
+    } else {
+      reorder.list.insertBefore(reorder.placeholder, referenceRow);
+    }
+  }
+
+  /** @param {boolean} cancelled @param {boolean} [cancelRow] */
+  #finishReorder(cancelled, cancelRow = false) {
+    const reorder = this.#reorder;
+    if (reorder === null) {
+      return;
+    }
+
+    // Stop scrolling before restoring the row to a stable list position.
+    this.#reorder = null;
+    if (this.#autoScrollFrame !== null) {
+      window.cancelAnimationFrame(this.#autoScrollFrame);
+      this.#autoScrollFrame = null;
+    }
+    delete this.dataset.reordering;
+
+    let targetIndex = reorder.originalIndex;
+    if (cancelled) {
+      reorder.placeholder.remove();
+      const remainingRows = this.#savedRows.filter((row) => row !== reorder.row);
+      reorder.list.insertBefore(
+        reorder.row,
+        remainingRows[reorder.originalIndex] ?? null,
+      );
+    } else {
+      reorder.list.insertBefore(reorder.row, reorder.placeholder);
+      reorder.placeholder.remove();
+      targetIndex = this.#savedRows.indexOf(reorder.row);
+    }
+    this.#clearReorderStyles(reorder.row);
+    if (cancelRow) {
+      reorder.row.cancelReordering();
+    }
+
+    if (!cancelled && targetIndex !== reorder.originalIndex) {
+      this.dispatchEvent(
+        new CustomEvent("municipality-reorder", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            municipalityId: reorder.municipalityId,
+            targetIndex,
+          },
+        }),
+      );
+    }
+  }
+
+  /** @param {CieloMunicipalityRow} row */
+  #clearReorderStyles(row) {
+    delete row.dataset.reorderActive;
+    row.style.removeProperty("--reorder-left");
+    row.style.removeProperty("--reorder-top");
+    row.style.removeProperty("--reorder-width");
+    row.style.removeProperty("--reorder-height");
+  }
+
+  #scheduleAutoScroll() {
+    if (this.#reorder === null || this.#autoScrollFrame !== null) {
+      return;
+    }
+
+    this.#autoScrollFrame = window.requestAnimationFrame(() => {
+      this.#autoScrollFrame = null;
+      const reorder = this.#reorder;
+      if (reorder === null) {
+        return;
+      }
+
+      const rectangle = this.getBoundingClientRect();
+      const edgeSize = reorder.rowHeight;
+      const maximumSpeed = 14;
+      let speed = 0;
+      if (reorder.pointerY < rectangle.top + edgeSize) {
+        speed = -maximumSpeed *
+          (1 - Math.max(0, reorder.pointerY - rectangle.top) / edgeSize);
+      } else if (reorder.pointerY > rectangle.bottom - edgeSize) {
+        speed = maximumSpeed *
+          (1 - Math.max(0, rectangle.bottom - reorder.pointerY) / edgeSize);
+      }
+
+      if (speed === 0) {
+        return;
+      }
+
+      const previousScrollTop = this.scrollTop;
+      this.scrollTop += speed;
+      if (this.scrollTop !== previousScrollTop) {
+        this.#moveReorderPlaceholder();
+        this.#scheduleAutoScroll();
+      }
     });
   }
 
@@ -207,6 +438,12 @@ export class CieloLocationsView extends HTMLElement {
           background: var(--cielo-color-locations-background);
           overscroll-behavior-y: contain;
           scrollbar-gutter: stable;
+        }
+
+        :host([data-reordering]) {
+          cursor: grabbing;
+          user-select: none;
+          -webkit-user-select: none;
         }
 
         * {
@@ -354,6 +591,30 @@ export class CieloLocationsView extends HTMLElement {
           background: transparent;
         }
 
+        .reorder-placeholder {
+          min-height: var(--cielo-row-height);
+          border: 1px dashed rgb(252 252 250 / 28%);
+          border-radius: 1rem;
+          background: rgb(252 252 250 / 4%);
+        }
+
+        cielo-municipality-row[data-reorder-active="true"] {
+          position: fixed;
+          z-index: 20;
+          top: var(--reorder-top);
+          left: var(--reorder-left);
+          width: var(--reorder-width);
+          height: var(--reorder-height);
+          border-radius: 1rem;
+          box-shadow: 0 0.85rem 1.8rem rgb(13 34 50 / 34%);
+          pointer-events: none;
+          transform: scale(1.015);
+          transform-origin: center;
+          transition:
+            box-shadow 120ms ease-out,
+            transform 120ms ease-out;
+        }
+
         .empty-state {
           overflow: hidden;
           border: 1px solid var(--cielo-color-border);
@@ -437,6 +698,12 @@ export class CieloLocationsView extends HTMLElement {
           .content {
             min-height: calc(100% - 5.05rem - env(safe-area-inset-top));
             padding-top: 0.55rem;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          cielo-municipality-row[data-reorder-active="true"] {
+            transition-duration: 1ms;
           }
         }
       </style>
@@ -530,9 +797,10 @@ export class CieloLocationsView extends HTMLElement {
       return;
     }
 
-    const municipalities = this.#catalog.filter((municipality) =>
-      this.#trackedIds.has(municipality.id),
-    ).sort(compareMunicipalities);
+    const municipalities = getTrackedMunicipalities(
+      this.#trackedIds,
+      this.#municipalitiesById,
+    );
     list.replaceChildren(
       ...municipalities.map((municipality) =>
         this.#createRow(municipality, "saved"),

@@ -2,6 +2,7 @@ const rowActionGap = 10;
 const rowActionSize = 44;
 const rowActionWidth = rowActionSize + rowActionGap * 2;
 const rowGestureSlop = 8;
+const rowLongPressDelay = 400;
 const rowOpenVelocity = -0.45;
 
 /**
@@ -24,7 +25,9 @@ export class CieloMunicipalityRow extends HTMLElement {
     offset: 0,
     dragging: false,
     rejected: false,
+    reordering: false,
     suppressClick: false,
+    longPressTimeoutId: null,
   };
 
   constructor() {
@@ -35,6 +38,10 @@ export class CieloMunicipalityRow extends HTMLElement {
 
   connectedCallback() {
     this.setAttribute("role", "listitem");
+  }
+
+  disconnectedCallback() {
+    this.#cancelLongPress();
   }
 
   /** @param {Municipality | null} value */
@@ -80,6 +87,31 @@ export class CieloMunicipalityRow extends HTMLElement {
     this.shadowRoot?.querySelector(".open-button")?.focus({ preventScroll });
   }
 
+  cancelReordering() {
+    if (!this.#gesture.reordering) {
+      return;
+    }
+
+    const button = this.shadowRoot?.querySelector(".open-button");
+    const pointerId = this.#gesture.pointerId;
+    if (
+      button instanceof HTMLButtonElement &&
+      pointerId !== null &&
+      button.hasPointerCapture(pointerId)
+    ) {
+      button.releasePointerCapture(pointerId);
+    }
+
+    // Suppress the release click after an explicitly cancelled long press.
+    this.#cancelLongPress();
+    this.#gesture.pointerId = null;
+    this.#gesture.dragging = false;
+    this.#gesture.rejected = false;
+    this.#gesture.reordering = false;
+    this.#gesture.suppressClick = true;
+    this.dataset.reordering = "false";
+  }
+
   #openAction() {
     if (this.#mode !== "saved") {
       return;
@@ -117,6 +149,8 @@ export class CieloMunicipalityRow extends HTMLElement {
       this.#gesture.offset = this.#gesture.startOffset;
       this.#gesture.dragging = false;
       this.#gesture.rejected = false;
+      this.#gesture.reordering = false;
+      this.#scheduleLongPress(button, event);
     });
 
     this.shadowRoot?.addEventListener("pointermove", (event) => {
@@ -127,6 +161,11 @@ export class CieloMunicipalityRow extends HTMLElement {
         this.#gesture.pointerId !== event.pointerId ||
         this.#gesture.rejected
       ) {
+        return;
+      }
+
+      if (this.#gesture.reordering) {
+        event.preventDefault();
         return;
       }
 
@@ -141,6 +180,7 @@ export class CieloMunicipalityRow extends HTMLElement {
           return;
         }
 
+        this.#cancelLongPress();
         if (Math.abs(verticalDistance) >= Math.abs(horizontalDistance)) {
           this.#gesture.rejected = true;
           return;
@@ -189,11 +229,60 @@ export class CieloMunicipalityRow extends HTMLElement {
     });
   }
 
+  /** @param {HTMLButtonElement} button @param {PointerEvent} event */
+  #scheduleLongPress(button, event) {
+    this.#cancelLongPress();
+    this.#gesture.longPressTimeoutId = window.setTimeout(() => {
+      if (
+        this.#gesture.pointerId !== event.pointerId ||
+        this.#gesture.dragging ||
+        this.#gesture.rejected ||
+        !this.isConnected
+      ) {
+        return;
+      }
+
+      try {
+        button.setPointerCapture(event.pointerId);
+      } catch (error) {
+        console.warn("No se pudo iniciar la reordenación", error);
+        return;
+      }
+
+      // Hand the stationary gesture to the parent list.
+      this.closeAction();
+      this.#gesture.reordering = true;
+      this.dataset.reordering = "true";
+      this.dispatchEvent(
+        new CustomEvent("municipality-reorder-start", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            municipalityId: this.#municipality?.id ?? "",
+            pointerId: event.pointerId,
+            clientY: event.clientY,
+          },
+        }),
+      );
+    }, rowLongPressDelay);
+  }
+
+  #cancelLongPress() {
+    if (this.#gesture.longPressTimeoutId === null) {
+      return;
+    }
+
+    window.clearTimeout(this.#gesture.longPressTimeoutId);
+    this.#gesture.longPressTimeoutId = null;
+  }
+
   /** @param {PointerEvent} event @param {boolean} [cancelled] */
   #settleGesture(event, cancelled = false) {
     if (this.#gesture.pointerId !== event.pointerId) {
       return;
     }
+
+    this.#cancelLongPress();
 
     // Release capture before choosing the gesture's final resting state.
     const button = this.shadowRoot?.querySelector(".open-button");
@@ -202,7 +291,10 @@ export class CieloMunicipalityRow extends HTMLElement {
     }
 
     // Restore cancelled drags or settle completed drags at the nearest state.
-    if (this.#gesture.dragging && cancelled) {
+    if (this.#gesture.reordering) {
+      this.#gesture.suppressClick = !cancelled;
+      this.closeAction();
+    } else if (this.#gesture.dragging && cancelled) {
       this.#gesture.suppressClick = false;
       if (this.#gesture.startOffset === -rowActionWidth) {
         this.#openAction();
@@ -226,6 +318,8 @@ export class CieloMunicipalityRow extends HTMLElement {
     this.#gesture.pointerId = null;
     this.#gesture.dragging = false;
     this.#gesture.rejected = false;
+    this.#gesture.reordering = false;
+    this.dataset.reordering = "false";
   }
 
   /** @param {Event} event */
@@ -354,6 +448,12 @@ export class CieloMunicipalityRow extends HTMLElement {
         }
 
         :host([data-dragging="true"]) .open-button.saved {
+          transition: none;
+        }
+
+        :host([data-reordering="true"]) .open-button.saved {
+          border-color: rgb(252 252 250 / 34%);
+          background: var(--cielo-color-surface);
           transition: none;
         }
 
