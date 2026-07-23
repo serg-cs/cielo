@@ -329,7 +329,10 @@ export class CieloLocationsView extends HTMLElement {
         .content {
           position: relative;
           z-index: 1;
+          display: flex;
+          flex-direction: column;
           max-width: var(--cielo-content-width);
+          min-height: calc(100% - 4.6rem - env(safe-area-inset-top));
           margin-inline: auto;
           padding: 0.15rem var(--cielo-space-4) calc(2rem + env(safe-area-inset-bottom));
         }
@@ -413,6 +416,15 @@ export class CieloLocationsView extends HTMLElement {
           -webkit-tap-highlight-color: transparent;
         }
 
+        .source-attribution {
+          margin: auto 0 0;
+          padding-top: 1.5rem;
+          color: var(--cielo-color-muted);
+          font-size: 0.75rem;
+          line-height: 1.4;
+          text-align: center;
+        }
+
         button:active {
           opacity: 0.78;
         }
@@ -423,6 +435,7 @@ export class CieloLocationsView extends HTMLElement {
           }
 
           .content {
+            min-height: calc(100% - 5.05rem - env(safe-area-inset-top));
             padding-top: 0.55rem;
           }
         }
@@ -475,6 +488,7 @@ export class CieloLocationsView extends HTMLElement {
           <p id="search-status" class="status" role="status" hidden></p>
           <div id="results-list" class="list" role="list" aria-label="Resultados"></div>
         </section>
+        <p class="source-attribution">Fuente: AEMET</p>
       </div>
     `;
   }

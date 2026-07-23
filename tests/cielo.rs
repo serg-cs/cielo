@@ -46,3 +46,14 @@ fn help_describes_the_generate_command() {
         .stdout(predicate::str::contains("generate"))
         .stdout(predicate::str::contains("generate-data"));
 }
+
+#[test]
+fn version_reports_v1_release() {
+    let mut command = cargo_bin_cmd!("cielo");
+
+    command
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cielo 1.0.0"));
+}

@@ -147,9 +147,25 @@ fn publishes_complete_static_site() {
     assert!(index.contains("<cielo-app></cielo-app>"));
     assert!(index.contains("viewport-fit=cover"));
     assert!(index.contains("name=\"theme-color\""));
+    assert!(index.contains("rel=\"manifest\" href=\"./manifest.webmanifest\""));
+    assert!(index.contains("rel=\"apple-touch-icon\""));
     assert!(index.contains("rel=\"modulepreload\""));
     assert!(index.contains("type=\"module\" src=\"./assets/site.js\""));
+    let manifest_text = fs::read_to_string(output_dir.join("manifest.webmanifest"))
+        .expect("manifest should be readable");
+    let manifest: Value = serde_json::from_str(&manifest_text).expect("manifest should be JSON");
+    assert_eq!(manifest["name"], "Cielo");
+    assert_eq!(manifest["display"], "standalone");
+    assert_eq!(manifest["orientation"], "portrait");
     assert!(output_dir.join("icon.svg").is_file());
+    for icon in [
+        "assets/app-icons/apple-touch-icon.png",
+        "assets/app-icons/icon-192.png",
+        "assets/app-icons/icon-512.png",
+        "assets/app-icons/icon-maskable-512.png",
+    ] {
+        assert!(output_dir.join(icon).is_file(), "missing app icon {icon}");
+    }
     assert!(output_dir.join("assets/site.css").is_file());
     let script =
         fs::read_to_string(output_dir.join("assets/site.js")).expect("script should be readable");
@@ -161,6 +177,8 @@ fn publishes_complete_static_site() {
     assert!(service_worker.contains("shell-v1"));
     assert!(service_worker.contains("cacheFirst"));
     assert!(service_worker.contains("`${cachePrefix}data-v1`"));
+    assert!(service_worker.contains("./manifest.webmanifest"));
+    assert!(service_worker.contains("./assets/app-icons/icon-maskable-512.png"));
     assert!(!service_worker.contains("./assets/icons.svg"));
 
     // Recursive embedding must include every dependency of the module entrypoint.
@@ -184,6 +202,10 @@ fn publishes_complete_static_site() {
         .expect("storage library should be readable");
     assert!(storage.contains("cielo.trackedMunicipalities"));
     assert!(storage.contains("cielo.lastMunicipality"));
+    let locations_view =
+        fs::read_to_string(output_dir.join("assets/components/cielo-locations-view.js"))
+            .expect("locations view should be readable");
+    assert!(locations_view.contains("Fuente: AEMET"));
     assert_complete_icon_assets(&output_dir, &service_worker);
     assert!(output_dir.join("data/temperatures/35001.json").is_file());
 }

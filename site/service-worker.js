@@ -6,7 +6,12 @@ const dataCacheName = `${cachePrefix}data-v1`;
 const shellPaths = [
   "./",
   "./index.html",
+  "./manifest.webmanifest",
   "./icon.svg",
+  "./assets/app-icons/apple-touch-icon.png",
+  "./assets/app-icons/icon-192.png",
+  "./assets/app-icons/icon-512.png",
+  "./assets/app-icons/icon-maskable-512.png",
   "./assets/site.css",
   "./assets/site.js",
   "./assets/components/cielo-app.js",
