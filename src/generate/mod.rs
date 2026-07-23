@@ -21,8 +21,9 @@ const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
 const DATA_DIRECTORY: &str = "data";
 const DATA_MARKER_CONTENT: &str = "cielo-output=data\ncielo-schema=1\n";
+const ICON_COMPONENT_FILENAME: &str = "assets/components/cielo-icon.js";
+const ICON_GLYPHS_MARKER: &str = "/* @cielo-icon-glyphs */";
 const ICONS_DIRECTORY: &str = "assets/icons";
-const ICON_SPRITE_FILENAME: &str = "assets/icons.svg";
 const LEGACY_DATA_MARKER_CONTENT: &str = "cielo-schema=1\n";
 const MANAGED_MARKER: &str = ".cielo-generated";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
@@ -238,19 +239,26 @@ fn write_site_assets(output_dir: &Path) -> Result<()> {
         .extract(output_dir)
         .context("failed to write embedded site assets")?;
 
-    // Derive the deployable sprite from the canonical individual SVG files.
-    write_icon_sprite(output_dir)
+    // Bundle canonical SVG sources into the component loaded with the app shell.
+    write_icon_catalog(output_dir)
 }
 
-fn write_icon_sprite(output_dir: &Path) -> Result<()> {
+fn write_icon_catalog(output_dir: &Path) -> Result<()> {
     let icons_dir = output_dir.join(ICONS_DIRECTORY);
-    let sprite = build_icon_sprite(&icons_dir)?;
-    let sprite_path = output_dir.join(ICON_SPRITE_FILENAME);
-    fs::write(&sprite_path, sprite)
-        .with_context(|| format!("failed to write icon sprite {}", sprite_path.display()))
+    let catalog = build_icon_catalog(&icons_dir)?;
+    let component_path = output_dir.join(ICON_COMPONENT_FILENAME);
+    let component = fs::read_to_string(&component_path)
+        .with_context(|| format!("failed to read icon component {}", component_path.display()))?;
+    let component = inject_icon_catalog(&component, &catalog)?;
+    fs::write(&component_path, component).with_context(|| {
+        format!(
+            "failed to write icon component {}",
+            component_path.display()
+        )
+    })
 }
 
-fn build_icon_sprite(icons_dir: &Path) -> Result<String> {
+fn build_icon_catalog(icons_dir: &Path) -> Result<String> {
     let mut icon_paths = fs::read_dir(icons_dir)
         .with_context(|| format!("failed to read icon directory {}", icons_dir.display()))?
         .filter_map(|entry| match entry {
@@ -271,10 +279,7 @@ fn build_icon_sprite(icons_dir: &Path) -> Result<String> {
     }
 
     // Stable ordering makes generated releases and reviews reproducible.
-    let mut sprite = String::from(
-        "<!-- Generated from assets/icons/*.svg; see assets/icons/LICENSE. -->\n\
-         <svg xmlns=\"http://www.w3.org/2000/svg\">\n",
-    );
+    let mut catalog = String::new();
     for icon_path in icon_paths {
         let icon_name = icon_path
             .file_stem()
@@ -282,14 +287,21 @@ fn build_icon_sprite(icons_dir: &Path) -> Result<String> {
             .context("icon filename is not valid UTF-8")?;
         let source = fs::read_to_string(&icon_path)
             .with_context(|| format!("failed to read icon {}", icon_path.display()))?;
-        sprite.push_str(&build_icon_symbol(icon_name, &source)?);
+        let glyph = build_icon_glyph(icon_name, &source)?;
+        let encoded_name =
+            serde_json::to_string(icon_name).context("failed to encode icon name")?;
+        let encoded_glyph = serde_json::to_string(glyph).context("failed to encode icon glyph")?;
+        catalog.push_str("  [");
+        catalog.push_str(&encoded_name);
+        catalog.push_str(", ");
+        catalog.push_str(&encoded_glyph);
+        catalog.push_str("],\n");
     }
-    sprite.push_str("</svg>\n");
 
-    Ok(sprite)
+    Ok(catalog)
 }
 
-fn build_icon_symbol(icon_name: &str, source: &str) -> Result<String> {
+fn build_icon_glyph<'a>(icon_name: &str, source: &'a str) -> Result<&'a str> {
     if !is_valid_icon_name(icon_name) {
         bail!("invalid icon name: {icon_name}");
     }
@@ -319,11 +331,16 @@ fn build_icon_symbol(icon_name: &str, source: &str) -> Result<String> {
     if attributes.contains("id=") {
         bail!("icon SVG root must not define an ID");
     }
-    let body = &source[root_open_end + 1..root_close_start];
 
-    Ok(format!(
-        "  <symbol id=\"{icon_name}\"{attributes}>{body}  </symbol>\n"
-    ))
+    Ok(&source[root_start..root_close_start + "</svg>".len()])
+}
+
+fn inject_icon_catalog(component: &str, catalog: &str) -> Result<String> {
+    if component.matches(ICON_GLYPHS_MARKER).count() != 1 {
+        bail!("icon component must contain exactly one glyph marker");
+    }
+
+    Ok(component.replacen(ICON_GLYPHS_MARKER, catalog, 1))
 }
 
 fn is_valid_icon_name(name: &str) -> bool {

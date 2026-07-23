@@ -158,10 +158,10 @@ fn publishes_complete_static_site() {
     assert!(script.contains("serviceWorker.register"));
     let service_worker = fs::read_to_string(output_dir.join("service-worker.js"))
         .expect("service worker should be readable");
-    assert!(service_worker.contains("shell-v2"));
+    assert!(service_worker.contains("shell-v1"));
     assert!(service_worker.contains("cacheFirst"));
     assert!(service_worker.contains("`${cachePrefix}data-v1`"));
-    assert!(service_worker.contains("./assets/icons.svg"));
+    assert!(!service_worker.contains("./assets/icons.svg"));
 
     // Recursive embedding must include every dependency of the module entrypoint.
     let app = fs::read_to_string(output_dir.join("assets/components/cielo-app.js"))
@@ -191,14 +191,16 @@ fn publishes_complete_static_site() {
 fn assert_complete_icon_assets(output_dir: &Path, service_worker: &str) {
     let icon_component = fs::read_to_string(output_dir.join("assets/components/cielo-icon.js"))
         .expect("icon component should be readable");
-    assert!(icon_component.contains("new URL(\"../icons.svg\", import.meta.url)"));
-    assert!(icon_component.contains("<use></use>"));
-    assert!(!icon_component.contains("const iconGlyphs"));
-    assert!(!icon_component.contains("<path"));
+    assert!(icon_component.contains("const iconGlyphs = new Map(["));
+    assert!(!icon_component.contains(ICON_GLYPHS_MARKER));
+    assert!(!icon_component.contains("icons.svg"));
+    assert!(!icon_component.contains("<use"));
+    assert!(icon_component.contains("<svg"));
+    assert!(icon_component.contains("<path"));
     assert!(!icon_component.contains("maskImage"));
-    let icon_sprite = fs::read_to_string(output_dir.join(ICON_SPRITE_FILENAME))
-        .expect("icon sprite should be readable");
-    let mut previous_symbol_position = None;
+    assert!(!output_dir.join("assets/icons.svg").exists());
+
+    let mut previous_entry_position = None;
     for icon in [
         "circle-x.svg",
         "cloud-drizzle.svg",
@@ -228,43 +230,67 @@ fn assert_complete_icon_assets(output_dir: &Path, service_worker: &str) {
             !service_worker.contains(&format!("./assets/icons/{icon}")),
             "source icon is still precached separately: {icon}"
         );
-        let symbol = format!("<symbol id=\"{}\"", icon.trim_end_matches(".svg"));
-        let symbol_position = icon_sprite
-            .find(&symbol)
-            .unwrap_or_else(|| panic!("icon sprite is missing {symbol}"));
+        let entry = format!("[\"{}\", ", icon.trim_end_matches(".svg"));
+        let entry_position = icon_component
+            .find(&entry)
+            .unwrap_or_else(|| panic!("icon component is missing {entry}"));
         assert!(
-            previous_symbol_position.is_none_or(|previous| previous < symbol_position),
-            "icon sprite is not deterministically sorted at {icon}"
+            previous_entry_position.is_none_or(|previous| previous < entry_position),
+            "icon catalog is not deterministically sorted at {icon}"
         );
-        previous_symbol_position = Some(symbol_position);
+        previous_entry_position = Some(entry_position);
     }
-    assert_eq!(icon_sprite.matches("<symbol id=").count(), 19);
+    assert_eq!(icon_component.matches("  [\"").count(), 19);
+
+    // Preserve semantic weather colors when embedding the canonical SVGs.
+    for color in ["#fcfcfa", "#ffd866", "#78dce8", "#d2dfe8"] {
+        assert!(
+            icon_component.contains(color),
+            "icon component is missing weather color {color}"
+        );
+    }
     assert!(output_dir.join("assets/icons/LICENSE").is_file());
 }
 
 #[test]
-fn builds_icon_symbol_from_canonical_svg() {
+fn builds_icon_glyph_from_canonical_svg() {
     let source = r#"<!-- license -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="currentColor">
   <path d="M1 2h3" />
 </svg>
 "#;
 
-    let symbol = build_icon_symbol("sample-icon", source).expect("symbol should build");
+    let glyph = build_icon_glyph("sample-icon", source).expect("glyph should build");
 
-    assert!(symbol.starts_with("  <symbol id=\"sample-icon\""));
-    assert!(symbol.contains("viewBox=\"0 0 24 24\""));
-    assert!(symbol.contains("stroke=\"currentColor\""));
-    assert!(symbol.contains("<path d=\"M1 2h3\" />"));
-    assert!(!symbol.contains("<svg"));
+    assert!(glyph.starts_with("<svg"));
+    assert!(glyph.contains("viewBox=\"0 0 24 24\""));
+    assert!(glyph.contains("stroke=\"currentColor\""));
+    assert!(glyph.contains("<path d=\"M1 2h3\" />"));
+    assert!(!glyph.contains("license"));
 }
 
 #[test]
-fn rejects_invalid_icon_symbols() {
-    assert!(build_icon_symbol("../escape", "<svg></svg>").is_err());
-    assert!(build_icon_symbol("search", "<svg id=\"duplicate\"></svg>").is_err());
-    assert!(build_icon_symbol("search", "<svg><path /></svg>trailing").is_err());
-    assert!(build_icon_symbol("search", "<svg><path /></symbol>").is_err());
+fn rejects_invalid_icon_glyphs() {
+    assert!(build_icon_glyph("../escape", "<svg></svg>").is_err());
+    assert!(build_icon_glyph("search", "<svg id=\"duplicate\"></svg>").is_err());
+    assert!(build_icon_glyph("search", "<svg><path /></svg>trailing").is_err());
+    assert!(build_icon_glyph("search", "<svg><path /></symbol>").is_err());
+}
+
+#[test]
+fn injects_icon_catalog_at_exactly_one_marker() {
+    let component = format!("before\n{ICON_GLYPHS_MARKER}\nafter");
+    let generated = inject_icon_catalog(&component, "icons").expect("catalog should be injected");
+
+    assert_eq!(generated, "before\nicons\nafter");
+    assert!(inject_icon_catalog("without marker", "icons").is_err());
+    assert!(
+        inject_icon_catalog(
+            &format!("{ICON_GLYPHS_MARKER}\n{ICON_GLYPHS_MARKER}"),
+            "icons"
+        )
+        .is_err()
+    );
 }
 
 #[test]

@@ -1,5 +1,7 @@
 const iconNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-const spriteUrl = new URL("../icons.svg", import.meta.url);
+const iconGlyphs = new Map([
+/* @cielo-icon-glyphs */
+]);
 
 export class CieloIcon extends HTMLElement {
   static observedAttributes = ["name"];
@@ -20,22 +22,29 @@ export class CieloIcon extends HTMLElement {
   }
 
   #updateIcon() {
-    const icon = this.shadowRoot?.querySelector(".icon");
-    const use = this.shadowRoot?.querySelector("use");
-    if (!(icon instanceof SVGSVGElement) || !(use instanceof SVGUseElement)) {
+    const slot = this.shadowRoot?.querySelector(".icon-slot");
+    if (!(slot instanceof HTMLElement)) {
       return;
     }
 
     const name = this.getAttribute("name") ?? "";
-    if (!iconNamePattern.test(name)) {
-      icon.hidden = true;
-      use.removeAttribute("href");
+    const glyph = iconNamePattern.test(name) ? iconGlyphs.get(name) : undefined;
+    if (glyph === undefined) {
+      slot.replaceChildren();
       return;
     }
 
-    // Resolve every validated name against the one generated sprite resource.
-    use.setAttribute("href", `${spriteUrl.href}#${name}`);
-    icon.hidden = false;
+    // Parse only the selected build-generated glyph for this component instance.
+    slot.innerHTML = glyph;
+    const icon = slot.querySelector("svg");
+    if (!(icon instanceof SVGSVGElement)) {
+      slot.replaceChildren();
+      return;
+    }
+
+    icon.classList.add("icon");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
   }
 
   #render() {
@@ -56,29 +65,21 @@ export class CieloIcon extends HTMLElement {
           vertical-align: -0.125em;
         }
 
+        .icon-slot,
         .icon {
           display: block;
           width: 100%;
           height: 100%;
+        }
+
+        .icon {
           fill: none;
-          stroke: currentcolor;
           stroke-linecap: round;
           stroke-linejoin: round;
           stroke-width: 2;
         }
-
-        .icon[hidden] {
-          display: none;
-        }
       </style>
-      <svg
-        class="icon"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <use></use>
-      </svg>
+      <span class="icon-slot"></span>
     `;
   }
 }

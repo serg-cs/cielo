@@ -422,7 +422,7 @@ export class CieloMunicipalityRow extends HTMLElement {
           border-radius: 50%;
           outline: none;
           outline-offset: 0.12rem;
-          color: #fff;
+          color: var(--cielo-color-on-destructive);
           background: var(--cielo-color-destructive);
           box-shadow: 0 0.2rem 0.45rem rgb(50 7 14 / 24%);
           opacity: 0;

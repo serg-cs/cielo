@@ -1,16 +1,19 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-  color: #1c1915;
-  background: #f4efe6;
+  color: #fcfcfa;
+  background: #285b78;
   font-synthesis: none;
-  --cielo-color-border: rgb(28 25 21 / 18%);
-  --cielo-color-destructive: #e6545e;
-  --cielo-color-focus: #1746b3;
-  --cielo-color-locations-background: #f4efe6;
-  --cielo-color-municipality-background: #f4efe6;
-  --cielo-color-muted: #5f584f;
-  --cielo-color-text: #1c1915;
+  --cielo-color-accent: #78dce8;
+  --cielo-color-border: rgb(252 252 250 / 18%);
+  --cielo-color-destructive: #ff6188;
+  --cielo-color-focus: #ffd866;
+  --cielo-color-locations-background: #285b78;
+  --cielo-color-municipality-background: #285b78;
+  --cielo-color-muted: #d2dfe8;
+  --cielo-color-on-destructive: #203f5a;
+  --cielo-color-surface: rgb(252 252 250 / 6%);
+  --cielo-color-text: #fcfcfa;
   --cielo-content-width: 38rem;
   --cielo-focus-outline: 0.18rem solid var(--cielo-color-focus);
   --cielo-font-size-small: 0.875rem;
@@ -62,7 +65,7 @@ noscript {
   padding: 0.8rem 1rem;
   border: 1px solid rgb(255 255 255 / 16%);
   border-radius: 0.9rem;
-  color: #fff;
-  background: rgb(105 28 39 / 92%);
+  color: var(--cielo-color-text);
+  background: rgb(122 37 63 / 96%);
   text-align: center;
 }

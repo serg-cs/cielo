@@ -473,7 +473,7 @@ export class CieloMunicipalityView extends HTMLElement {
           z-index: 10;
           inset: 0;
           display: block;
-          color-scheme: light;
+          color-scheme: dark;
         }
 
         :host([hidden]) {

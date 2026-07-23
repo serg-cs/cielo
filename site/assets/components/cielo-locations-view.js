@@ -53,7 +53,7 @@ export class CieloLocationsView extends HTMLElement {
     if (input !== null) {
       input.disabled = true;
     }
-    this.#setLoadStatus("No se pudieron cargar los municipios.", true);
+    this.#setLoadStatus("No se pudieron cargar los municipios", true);
     this.#renderContent();
   }
 
@@ -202,7 +202,7 @@ export class CieloLocationsView extends HTMLElement {
           display: block;
           height: 100%;
           overflow-y: auto;
-          color-scheme: light;
+          color-scheme: dark;
           color: var(--cielo-color-text);
           background: var(--cielo-color-locations-background);
           overscroll-behavior-y: contain;
@@ -341,10 +341,7 @@ export class CieloLocationsView extends HTMLElement {
           color: var(--cielo-color-muted);
           font-size: var(--cielo-font-size-small);
           line-height: 1.4;
-        }
-
-        .status[role="alert"] {
-          color: #8e1730;
+          text-align: center;
         }
 
         .list {
@@ -380,10 +377,10 @@ export class CieloLocationsView extends HTMLElement {
           width: 3.4rem;
           height: 3.4rem;
           padding: 0.75rem;
-          border: 1px solid rgb(0 0 0 / 14%);
+          border: 1px solid var(--cielo-color-border);
           border-radius: 50%;
-          color: #1746b3;
-          background: rgb(255 255 255 / 24%);
+          color: var(--cielo-color-accent);
+          background: var(--cielo-color-surface);
         }
 
         .empty-state h3,
@@ -405,12 +402,12 @@ export class CieloLocationsView extends HTMLElement {
         .empty-search-button {
           min-height: var(--cielo-touch-target);
           padding: 0.65rem 1.05rem;
-          border: 1px solid rgb(0 0 0 / 14%);
+          border: 1px solid rgb(252 252 250 / 26%);
           border-radius: var(--cielo-radius-pill);
           outline: none;
           outline-offset: 0.15rem;
-          color: #fff;
-          background: #315bd7;
+          color: var(--cielo-color-locations-background);
+          background: var(--cielo-color-accent);
           font-weight: 720;
           cursor: pointer;
           -webkit-tap-highlight-color: transparent;

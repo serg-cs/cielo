@@ -1,13 +1,12 @@
 const cachePrefix = "cielo-";
 // Bump the shell version whenever a release changes the precached application.
-const shellCacheName = `${cachePrefix}shell-v2`;
+const shellCacheName = `${cachePrefix}shell-v1`;
 // Application code owns this cache and writes only schema-validated responses.
 const dataCacheName = `${cachePrefix}data-v1`;
 const shellPaths = [
   "./",
   "./index.html",
   "./icon.svg",
-  "./assets/icons.svg",
   "./assets/site.css",
   "./assets/site.js",
   "./assets/components/cielo-app.js",
@@ -50,9 +49,7 @@ async function installCaches() {
 
   // Seed the complete immutable application shell in one cache operation.
   await shellCache.addAll(
-    shellPaths.map((path) =>
-      new Request(new URL(path, scope), { cache: "reload" })
-    ),
+    shellPaths.map((path) => new Request(new URL(path, scope), { cache: "reload" })),
   );
   await self.skipWaiting();
 }
@@ -93,9 +90,7 @@ async function cacheFirst(request) {
     return response;
   } catch (error) {
     if (request.mode === "navigate") {
-      const fallback = await cache.match(
-        new URL("./index.html", self.registration.scope),
-      );
+      const fallback = await cache.match(new URL("./index.html", self.registration.scope));
       if (fallback !== undefined) {
         return fallback;
       }

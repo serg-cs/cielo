@@ -7,15 +7,15 @@
   stroke-linecap="round"
   stroke-linejoin="round"
 >
-  <rect width="24" height="24" rx="4" fill="#0072ce" stroke="none" />
+  <rect width="24" height="24" rx="4" fill="#285b78" stroke="none" />
   <g transform="matrix(.75 0 0 .75 3 3)" stroke-width="2">
-    <g stroke="#ffd54a">
+    <g stroke="#ffd866">
       <path d="M12 2v2" />
       <path d="m4.93 4.93 1.41 1.41" />
       <path d="M20 12h2" />
       <path d="m19.07 4.93-1.41 1.41" />
       <path d="M15.947 12.65a4 4 0 0 0-5.925-4.128" />
     </g>
-    <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" stroke="#fff" />
+    <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" stroke="#fcfcfa" />
   </g>
 </svg>
