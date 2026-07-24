@@ -75,10 +75,10 @@ fn normalizes_aemet_province_qualifiers_and_bilingual_names() {
 #[test]
 fn publishes_expected_compact_json_layout() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let output_dir = temporary_root.path().join("site-data");
+    let output_dir = temporary_root.path().join("data");
     let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Data)
-        .expect("staging should be written");
+    let staging =
+        write_data_staging_directory(&output_dir, &snapshot).expect("staging should be written");
 
     publish_staging_directory(&staging, &output_dir, OutputKind::Data)
         .expect("snapshot should publish");
@@ -122,25 +122,19 @@ fn publishes_expected_compact_json_layout() {
 }
 
 #[test]
-fn publishes_complete_static_site() {
+fn publishes_complete_static_app_without_data() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let output_dir = temporary_root.path().join("site");
-    let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Site)
+    let output_dir = temporary_root.path().join("app");
+    let staging = write_app_staging_directory(&output_dir, "https://data.example.test/weather/")
         .expect("staging should be written");
 
-    publish_staging_directory(&staging, &output_dir, OutputKind::Site)
-        .expect("site should publish");
+    publish_staging_directory(&staging, &output_dir, OutputKind::App).expect("app should publish");
 
     assert_eq!(
         fs::read_to_string(output_dir.join(MANAGED_MARKER)).expect("marker should be readable"),
-        SITE_MARKER_CONTENT
+        APP_MARKER_CONTENT
     );
-    assert_eq!(
-        fs::read_to_string(output_dir.join(DATA_DIRECTORY).join(MANAGED_MARKER))
-            .expect("data marker should be readable"),
-        DATA_MARKER_CONTENT
-    );
+    assert!(!output_dir.join("data").exists());
     let index =
         fs::read_to_string(output_dir.join("index.html")).expect("index should be readable");
     assert!(index.contains("<html lang=\"es\">"));
@@ -179,19 +173,26 @@ fn publishes_complete_static_site() {
     assert!(service_worker.contains("`${cachePrefix}data-v1`"));
     assert!(service_worker.contains("./manifest.webmanifest"));
     assert!(service_worker.contains("./assets/app-icons/icon-maskable-512.png"));
+    assert!(service_worker.contains("./assets/lib/config.js"));
+    assert!(service_worker.contains("\"https://data.example.test/weather/\""));
+    assert!(service_worker.contains("url.href === municipalitiesUrl.href"));
+    assert!(service_worker.contains("url.href.startsWith(temperaturesUrl.href)"));
+    assert!(!service_worker.contains(DATA_URL_MARKER));
     assert!(!service_worker.contains("./assets/icons.svg"));
 
     // Recursive embedding must include every dependency of the module entrypoint.
     let app = fs::read_to_string(output_dir.join("assets/components/cielo-app.js"))
         .expect("app component should be readable");
     assert!(app.contains("customElements.define(\"cielo-app\""));
-    assert!(app.contains("./data/municipalities.json"));
+    assert!(app.contains("new URL(\"municipalities.json\", dataUrl)"));
+    assert!(!app.contains("./data/municipalities.json"));
     for module in [
         "assets/components/cielo-icon.js",
         "assets/components/cielo-locations-view.js",
         "assets/components/cielo-municipality-row.js",
         "assets/components/cielo-municipality-view.js",
         "assets/lib/catalog.js",
+        "assets/lib/config.js",
         "assets/lib/data-cache.js",
         "assets/lib/storage.js",
         "assets/lib/weather.js",
@@ -206,8 +207,27 @@ fn publishes_complete_static_site() {
         fs::read_to_string(output_dir.join("assets/components/cielo-locations-view.js"))
             .expect("locations view should be readable");
     assert!(locations_view.contains("Fuente: AEMET"));
+    let config = fs::read_to_string(output_dir.join(APP_CONFIG_FILENAME))
+        .expect("application configuration should be readable");
+    assert!(config.contains("\"https://data.example.test/weather/\""));
+    assert!(!config.contains(DATA_URL_MARKER));
+    let weather = fs::read_to_string(output_dir.join("assets/lib/weather.js"))
+        .expect("weather library should be readable");
+    assert!(weather.contains("forecastUrl(this.#dataUrl, municipality.id)"));
+    assert!(!weather.contains("./data/temperatures"));
     assert_complete_icon_assets(&output_dir, &service_worker);
-    assert!(output_dir.join("data/temperatures/35001.json").is_file());
+}
+
+#[test]
+fn embedded_app_templates_tag_a_valid_default_data_url() {
+    for filename in [APP_CONFIG_FILENAME, SERVICE_WORKER_FILENAME] {
+        let source = APP_DIRECTORY
+            .get_file(filename)
+            .and_then(include_dir::File::contents_utf8)
+            .expect("application template should contain UTF-8 source");
+
+        assert_eq!(source.matches(DATA_URL_MARKER).count(), 1);
+    }
 }
 
 fn assert_complete_icon_assets(output_dir: &Path, service_worker: &str) {
@@ -317,47 +337,70 @@ fn injects_icon_catalog_at_exactly_one_marker() {
 }
 
 #[test]
-fn data_refresh_preserves_site_assets_and_removes_stale_data() {
+fn data_rebuild_preserves_independent_app_and_removes_stale_data() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let site_dir = temporary_root.path().join("site");
+    let app_dir = temporary_root.path().join("app");
+    let data_dir = temporary_root.path().join("data");
     let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let site_staging = write_staging_directory(&site_dir, &snapshot, OutputKind::Site)
-        .expect("site staging should be written");
-    publish_staging_directory(&site_staging, &site_dir, OutputKind::Site)
-        .expect("site should publish");
+    build_app(&app_dir, "../data/").expect("app should build");
     let original_index =
-        fs::read_to_string(site_dir.join("index.html")).expect("index should be readable");
-    let data_dir = site_dir.join(DATA_DIRECTORY);
+        fs::read_to_string(app_dir.join("index.html")).expect("index should be readable");
+    let first_data_staging =
+        write_data_staging_directory(&data_dir, &snapshot).expect("data staging should be written");
+    publish_staging_directory(&first_data_staging, &data_dir, OutputKind::Data)
+        .expect("data should publish");
     fs::write(data_dir.join("stale.json"), "old").expect("stale data should be written");
 
-    let data_staging = write_staging_directory(&data_dir, &snapshot, OutputKind::Data)
-        .expect("data staging should be written");
+    let data_staging =
+        write_data_staging_directory(&data_dir, &snapshot).expect("data staging should be written");
     publish_staging_directory(&data_staging, &data_dir, OutputKind::Data)
         .expect("data should publish");
 
     assert!(!data_dir.join("stale.json").exists());
     assert!(data_dir.join(MUNICIPALITIES_FILENAME).is_file());
     assert_eq!(
-        fs::read_to_string(site_dir.join("index.html")).expect("index should remain readable"),
+        fs::read_to_string(app_dir.join("index.html")).expect("index should remain readable"),
         original_index
     );
     assert_eq!(
-        fs::read_to_string(site_dir.join(MANAGED_MARKER)).expect("site marker should be readable"),
-        SITE_MARKER_CONTENT
+        fs::read_to_string(app_dir.join(MANAGED_MARKER)).expect("app marker should be readable"),
+        APP_MARKER_CONTENT
     );
+}
+
+#[test]
+fn upgrades_legacy_combined_site_to_app_only() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let output_dir = temporary_root.path().join("app");
+    fs::create_dir_all(output_dir.join("data")).expect("legacy site should be created");
+    fs::write(output_dir.join(MANAGED_MARKER), LEGACY_SITE_MARKER_CONTENT)
+        .expect("legacy site marker should be written");
+    fs::write(output_dir.join("data/stale.json"), "old")
+        .expect("legacy nested data should be written");
+
+    build_app(&output_dir, "../data").expect("legacy site should be replaced");
+
+    assert!(!output_dir.join("data").exists());
+    assert_eq!(
+        fs::read_to_string(output_dir.join(MANAGED_MARKER)).expect("marker should be readable"),
+        APP_MARKER_CONTENT
+    );
+    let config = fs::read_to_string(output_dir.join(APP_CONFIG_FILENAME))
+        .expect("application configuration should be readable");
+    assert!(config.contains("\"../data/\""));
 }
 
 #[test]
 fn upgrades_legacy_data_snapshot_and_removes_stale_files() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let output_dir = temporary_root.path().join("site-data");
+    let output_dir = temporary_root.path().join("data");
     fs::create_dir(&output_dir).expect("old output should be created");
     fs::write(output_dir.join(MANAGED_MARKER), LEGACY_DATA_MARKER_CONTENT)
         .expect("old marker should be written");
     fs::write(output_dir.join("stale.json"), "old").expect("stale file should be written");
     let snapshot = build_snapshot(sample_data()).expect("snapshot should build");
-    let staging = write_staging_directory(&output_dir, &snapshot, OutputKind::Data)
-        .expect("staging should be written");
+    let staging =
+        write_data_staging_directory(&output_dir, &snapshot).expect("staging should be written");
 
     publish_staging_directory(&staging, &output_dir, OutputKind::Data)
         .expect("snapshot should publish");
@@ -373,29 +416,67 @@ fn upgrades_legacy_data_snapshot_and_removes_stale_files() {
 #[test]
 fn refuses_to_replace_a_different_output_kind() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let site_dir = temporary_root.path().join("site");
+    let app_dir = temporary_root.path().join("app");
     let data_dir = temporary_root.path().join("data");
     let legacy_dir = temporary_root.path().join("legacy");
-    for directory in [&site_dir, &data_dir, &legacy_dir] {
+    for directory in [&app_dir, &data_dir, &legacy_dir] {
         fs::create_dir(directory).expect("output should be created");
     }
-    fs::write(site_dir.join(MANAGED_MARKER), SITE_MARKER_CONTENT)
-        .expect("site marker should be written");
+    fs::write(app_dir.join(MANAGED_MARKER), APP_MARKER_CONTENT)
+        .expect("app marker should be written");
     fs::write(data_dir.join(MANAGED_MARKER), DATA_MARKER_CONTENT)
         .expect("data marker should be written");
     fs::write(legacy_dir.join(MANAGED_MARKER), LEGACY_DATA_MARKER_CONTENT)
         .expect("legacy marker should be written");
 
-    let data_error = validate_output_directory(&site_dir, OutputKind::Data)
-        .expect_err("site output should not be replaced with data");
-    let site_error = validate_output_directory(&data_dir, OutputKind::Site)
-        .expect_err("data output should not be replaced with a site");
-    let legacy_error = validate_output_directory(&legacy_dir, OutputKind::Site)
-        .expect_err("legacy data output should not be replaced with a site");
+    let data_error = validate_output_directory(&app_dir, OutputKind::Data)
+        .expect_err("app output should not be replaced with data");
+    let app_error = validate_output_directory(&data_dir, OutputKind::App)
+        .expect_err("data output should not be replaced with an app");
+    let legacy_error = validate_output_directory(&legacy_dir, OutputKind::App)
+        .expect_err("legacy data output should not be replaced with an app");
 
     assert!(data_error.to_string().contains("not managed as data"));
-    assert!(site_error.to_string().contains("not managed as site"));
-    assert!(legacy_error.to_string().contains("not managed as site"));
+    assert!(app_error.to_string().contains("not managed as app"));
+    assert!(legacy_error.to_string().contains("not managed as app"));
+}
+
+#[test]
+fn normalizes_supported_data_directory_urls() {
+    for (source, expected) in [
+        (
+            "https://data.example.test/weather",
+            "https://data.example.test/weather/",
+        ),
+        ("http://localhost:9000/data/", "http://localhost:9000/data/"),
+        ("/", "/"),
+        ("/weather", "/weather/"),
+        ("../data", "../data/"),
+        ("./data/", "./data/"),
+    ] {
+        assert_eq!(
+            normalize_data_url(source).expect("data URL should be valid"),
+            expected
+        );
+    }
+}
+
+#[test]
+fn rejects_unsupported_data_urls() {
+    for value in [
+        "",
+        "ftp://data.example.test/weather",
+        "//data.example.test/weather",
+        "https://user@example.test/weather",
+        "https://data.example.test/weather?version=1",
+        "https://data.example.test/weather#latest",
+        r"..\data",
+    ] {
+        assert!(
+            normalize_data_url(value).is_err(),
+            "unsupported data URL should fail: {value}"
+        );
+    }
 }
 
 #[test]

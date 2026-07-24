@@ -6,13 +6,12 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     aemet::AemetClient,
-    cli::{Cli, Command},
-    generate::OutputKind,
+    cli::{BuildDataArgs, BuildTarget, Cli, Command},
 };
 
 mod aemet;
+mod build;
 pub mod cli;
-mod generate;
 
 const API_KEY_ENV: &str = "AEMET_API_KEY";
 
@@ -32,11 +31,23 @@ pub fn init_tracing() {
 /// Returns an error when configuration, collection, validation, or publishing
 /// fails.
 pub async fn run(cli: Cli) -> Result<()> {
-    let (args, output_kind) = match cli.command {
-        Command::Generate(args) => (args, OutputKind::Site),
-        Command::GenerateData(args) => (args, OutputKind::Data),
-    };
+    let Command::Build(args) = cli.command;
+    match args.target {
+        BuildTarget::App(args) => {
+            build::build_app(&args.output_dir, &args.data_url)?;
+            info!(
+                data_url = args.data_url,
+                output_dir = %args.output_dir.display(),
+                "application shell built"
+            );
+        }
+        BuildTarget::Data(args) => build_data(&args).await?,
+    }
 
+    Ok(())
+}
+
+async fn build_data(args: &BuildDataArgs) -> Result<()> {
     // Keep credentials out of process arguments and generated files.
     let api_key = env::var(API_KEY_ENV)
         .with_context(|| format!("{API_KEY_ENV} environment variable is not set"))?;
@@ -44,15 +55,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         bail!("{API_KEY_ENV} environment variable is empty");
     }
 
-    // Collect and publish the requested output as one complete snapshot.
+    // Collect and publish one complete data snapshot.
     let client = AemetClient::new(api_key)?;
-    let summary = generate::generate(&client, &args.output_dir, output_kind).await?;
+    let summary = build::build_data(&client, &args.output_dir).await?;
     info!(
         municipalities = summary.municipalities,
         temperature_files = summary.temperature_files,
-        output = output_kind.as_str(),
         output_dir = %args.output_dir.display(),
-        "weather output generated"
+        "weather data built"
     );
 
     Ok(())

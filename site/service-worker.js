@@ -1,4 +1,10 @@
 const cachePrefix = "cielo-";
+const dataUrl = new URL(
+  "./data/" /* @cielo-data-url */,
+  self.registration.scope,
+);
+const municipalitiesUrl = new URL("municipalities.json", dataUrl);
+const temperaturesUrl = new URL("temperatures/", dataUrl);
 // Bump the shell version whenever a release changes the precached application.
 const shellCacheName = `${cachePrefix}shell-v1`;
 // Application code owns this cache and writes only schema-validated responses.
@@ -20,6 +26,7 @@ const shellPaths = [
   "./assets/components/cielo-municipality-row.js",
   "./assets/components/cielo-municipality-view.js",
   "./assets/lib/catalog.js",
+  "./assets/lib/config.js",
   "./assets/lib/data-cache.js",
   "./assets/lib/storage.js",
   "./assets/lib/weather.js",
@@ -39,8 +46,10 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== self.location.origin) {
     return;
   }
-  const dataUrl = new URL("./data/", self.registration.scope);
-  if (url.href.startsWith(dataUrl.href)) {
+  if (
+    url.href === municipalitiesUrl.href ||
+    url.href.startsWith(temperaturesUrl.href)
+  ) {
     // The page validates data before replacing its last-known-good response.
     return;
   }

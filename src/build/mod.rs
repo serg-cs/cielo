@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use include_dir::{Dir, include_dir};
+use reqwest::Url;
 use serde::Serialize;
 use tempfile::{Builder, TempDir};
 use tracing::warn;
@@ -19,51 +20,55 @@ mod tests;
 
 const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
-const DATA_DIRECTORY: &str = "data";
+const APP_CONFIG_FILENAME: &str = "assets/lib/config.js";
+const APP_MARKER_CONTENT: &str = "cielo-output=app\ncielo-schema=1\n";
 const DATA_MARKER_CONTENT: &str = "cielo-output=data\ncielo-schema=1\n";
+const DATA_URL_MARKER: &str = r#""./data/" /* @cielo-data-url */"#;
 const ICON_COMPONENT_FILENAME: &str = "assets/components/cielo-icon.js";
 const ICON_GLYPHS_MARKER: &str = "/* @cielo-icon-glyphs */";
 const ICONS_DIRECTORY: &str = "assets/icons";
 const LEGACY_DATA_MARKER_CONTENT: &str = "cielo-schema=1\n";
+const LEGACY_SITE_MARKER_CONTENT: &str = "cielo-output=site\ncielo-schema=1\n";
 const MANAGED_MARKER: &str = ".cielo-generated";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
 const SCHEMA_VERSION: u8 = 1;
-const SITE_MARKER_CONTENT: &str = "cielo-output=site\ncielo-schema=1\n";
+const SERVICE_WORKER_FILENAME: &str = "service-worker.js";
 const TEMPERATURES_DIRECTORY: &str = "temperatures";
 
-static SITE_DIRECTORY: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/site");
+static APP_DIRECTORY: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/site");
 
 /// Kind of generated artifact to publish.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OutputKind {
-    Site,
+    App,
     Data,
 }
 
 impl OutputKind {
-    pub(crate) const fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
-            Self::Site => "site",
+            Self::App => "app",
             Self::Data => "data",
         }
     }
 
     const fn marker_content(self) -> &'static str {
         match self {
-            Self::Site => SITE_MARKER_CONTENT,
+            Self::App => APP_MARKER_CONTENT,
             Self::Data => DATA_MARKER_CONTENT,
         }
     }
 
     fn accepts_marker(self, marker: &str) -> bool {
         marker == self.marker_content()
+            || self == Self::App && marker == LEGACY_SITE_MARKER_CONTENT
             || self == Self::Data && marker == LEGACY_DATA_MARKER_CONTENT
     }
 }
 
 /// Counts from a successfully published snapshot.
 #[derive(Debug)]
-pub(crate) struct GenerationSummary {
+pub(crate) struct DataBuildSummary {
     pub(crate) municipalities: usize,
     pub(crate) temperature_files: usize,
 }
@@ -115,24 +120,33 @@ struct Snapshot {
     forecasts: Vec<Forecast>,
 }
 
-/// Fetch and transactionally publish one complete generated artifact.
-pub(crate) async fn generate(
+/// Build and transactionally publish the static application shell.
+pub(crate) fn build_app(output_dir: &Path, data_url: &str) -> Result<()> {
+    let data_url = normalize_data_url(data_url)?;
+    let output_dir = validate_output_directory(output_dir, OutputKind::App)?;
+
+    // Render a complete artifact before replacing the currently published app.
+    let staging = write_app_staging_directory(&output_dir, &data_url)?;
+    publish_staging_directory(&staging, &output_dir, OutputKind::App)
+}
+
+/// Fetch and transactionally publish one complete weather-data snapshot.
+pub(crate) async fn build_data(
     client: &AemetClient,
     output_dir: &Path,
-    output_kind: OutputKind,
-) -> Result<GenerationSummary> {
+) -> Result<DataBuildSummary> {
     // Reject unsafe destinations before making a potentially expensive request.
-    let output_dir = validate_output_directory(output_dir, output_kind)?;
+    let output_dir = validate_output_directory(output_dir, OutputKind::Data)?;
     let data = client.fetch().await?;
     let snapshot = build_snapshot(data)?;
-    let summary = GenerationSummary {
+    let summary = DataBuildSummary {
         municipalities: snapshot.municipalities.len(),
         temperature_files: snapshot.forecasts.len(),
     };
 
     // A complete sibling staging directory keeps readers away from partial data.
-    let staging = write_staging_directory(&output_dir, &snapshot, output_kind)?;
-    publish_staging_directory(&staging, &output_dir, output_kind)?;
+    let staging = write_data_staging_directory(&output_dir, &snapshot)?;
+    publish_staging_directory(&staging, &output_dir, OutputKind::Data)?;
 
     Ok(summary)
 }
@@ -195,11 +209,19 @@ fn build_snapshot(data: AemetData) -> Result<Snapshot> {
     })
 }
 
-fn write_staging_directory(
-    output_dir: &Path,
-    snapshot: &Snapshot,
-    output_kind: OutputKind,
-) -> Result<TempDir> {
+fn write_app_staging_directory(output_dir: &Path, data_url: &str) -> Result<TempDir> {
+    let staging = create_staging_directory(output_dir, OutputKind::App)?;
+    write_app_files(staging.path(), data_url)?;
+    Ok(staging)
+}
+
+fn write_data_staging_directory(output_dir: &Path, snapshot: &Snapshot) -> Result<TempDir> {
+    let staging = create_staging_directory(output_dir, OutputKind::Data)?;
+    write_data_files(staging.path(), snapshot)?;
+    Ok(staging)
+}
+
+fn create_staging_directory(output_dir: &Path, output_kind: OutputKind) -> Result<TempDir> {
     let parent = output_dir
         .parent()
         .context("output directory does not have a parent")?;
@@ -211,17 +233,6 @@ fn write_staging_directory(
         .with_context(|| format!("failed to create staging directory in {}", parent.display()))?;
 
     write_managed_marker(staging.path(), output_kind)?;
-    match output_kind {
-        OutputKind::Site => {
-            write_site_assets(staging.path())?;
-            let data_dir = staging.path().join(DATA_DIRECTORY);
-            fs::create_dir(&data_dir).context("failed to create site data directory")?;
-            write_managed_marker(&data_dir, OutputKind::Data)?;
-            write_data_files(&data_dir, snapshot)?;
-        }
-        OutputKind::Data => write_data_files(staging.path(), snapshot)?,
-    }
-
     Ok(staging)
 }
 
@@ -233,14 +244,36 @@ fn write_managed_marker(output_dir: &Path, output_kind: OutputKind) -> Result<()
     .context("failed to write generated-directory marker")
 }
 
-fn write_site_assets(output_dir: &Path) -> Result<()> {
+fn write_app_files(output_dir: &Path, data_url: &str) -> Result<()> {
     // Keep the generated artifact independent from the source checkout.
-    SITE_DIRECTORY
+    APP_DIRECTORY
         .extract(output_dir)
-        .context("failed to write embedded site assets")?;
+        .context("failed to write embedded application assets")?;
 
-    // Bundle canonical SVG sources into the component loaded with the app shell.
+    // Complete deployment-specific configuration and generated asset catalogs.
+    write_data_url_configuration(output_dir, data_url)?;
     write_icon_catalog(output_dir)
+}
+
+fn write_data_url_configuration(output_dir: &Path, data_url: &str) -> Result<()> {
+    let encoded_data_url =
+        serde_json::to_string(data_url).context("failed to encode application data URL")?;
+    for filename in [APP_CONFIG_FILENAME, SERVICE_WORKER_FILENAME] {
+        let path = output_dir.join(filename);
+        let source = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read application asset {}", path.display()))?;
+        if source.matches(DATA_URL_MARKER).count() != 1 {
+            bail!(
+                "application asset must contain exactly one data URL marker: {}",
+                path.display()
+            );
+        }
+        let configured = source.replacen(DATA_URL_MARKER, &encoded_data_url, 1);
+        fs::write(&path, configured)
+            .with_context(|| format!("failed to configure application asset {}", path.display()))?;
+    }
+
+    Ok(())
 }
 
 fn write_icon_catalog(output_dir: &Path) -> Result<()> {
@@ -464,6 +497,51 @@ fn publish_staging_directory(
         warn!(%error, "failed to remove previous generated snapshot backup");
     }
     Ok(())
+}
+
+fn normalize_data_url(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("data URL cannot be empty");
+    }
+    if value.starts_with("//") {
+        bail!("data URL must include an explicit http or https scheme");
+    }
+    if value.contains('\\') {
+        bail!("data URL must use forward slashes");
+    }
+
+    // Resolve relative references against a fixed web base for uniform validation.
+    let validation_base =
+        Url::parse("https://cielo.invalid/app/").context("failed to prepare URL validation")?;
+    let (url, is_absolute) = match Url::parse(value) {
+        Ok(url) => (url, true),
+        Err(_) => (
+            validation_base
+                .join(value)
+                .with_context(|| format!("invalid data URL: {value}"))?,
+            false,
+        ),
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("data URL must use http or https");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("data URL must not contain credentials");
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        bail!("data URL must not contain a query or fragment");
+    }
+
+    let mut normalized = if is_absolute {
+        url.to_string()
+    } else {
+        value.to_owned()
+    };
+    if !normalized.ends_with('/') {
+        normalized.push('/');
+    }
+    Ok(normalized)
 }
 
 fn validate_output_directory(path: &Path, output_kind: OutputKind) -> Result<PathBuf> {

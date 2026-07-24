@@ -148,6 +148,7 @@ export class CurrentForecastStore extends EventTarget {
   #currentForecasts = new Map();
   #forecastStatuses = new Map();
   #inFlight = new Map();
+  #dataUrl;
   #fetcher;
   #now;
   #running = false;
@@ -155,13 +156,18 @@ export class CurrentForecastStore extends EventTarget {
   #hourTimeoutId = null;
 
   /**
+   * @param {URL} dataUrl
    * @param {{fetcher?: typeof fetch, now?: () => Date}} [options]
    */
-  constructor({
-    fetcher = globalThis.fetch.bind(globalThis),
-    now = () => new Date(),
-  } = {}) {
+  constructor(
+    dataUrl,
+    {
+      fetcher = globalThis.fetch.bind(globalThis),
+      now = () => new Date(),
+    } = {},
+  ) {
     super();
+    this.#dataUrl = dataUrl;
     this.#fetcher = fetcher;
     this.#now = now;
   }
@@ -282,7 +288,7 @@ export class CurrentForecastStore extends EventTarget {
 
     if (!this.#forecasts.has(municipalityId)) {
       const forecast = await readValidatedJson(
-        forecastUrl(municipality.id),
+        forecastUrl(this.#dataUrl, municipality.id),
         (document) => validateForecastDocument(document, municipality),
       );
       if (
@@ -357,7 +363,7 @@ export class CurrentForecastStore extends EventTarget {
   /** @param {Municipality} municipality */
   async #loadForecast(municipality) {
     const forecast = await fetchValidatedJson(
-      forecastUrl(municipality.id),
+      forecastUrl(this.#dataUrl, municipality.id),
       (document) => validateForecastDocument(document, municipality),
       this.#fetcher,
     );
@@ -570,11 +576,11 @@ export class CurrentForecastStore extends EventTarget {
   };
 }
 
-/** @param {string} municipalityId */
-function forecastUrl(municipalityId) {
+/** @param {URL} dataUrl @param {string} municipalityId */
+function forecastUrl(dataUrl, municipalityId) {
   return new URL(
-    `./data/temperatures/${encodeURIComponent(municipalityId)}.json`,
-    document.baseURI,
+    `temperatures/${encodeURIComponent(municipalityId)}.json`,
+    dataUrl,
   );
 }
 

@@ -13,6 +13,9 @@ import {
   readValidatedJson,
 } from "../lib/data-cache.js";
 import {
+  dataUrl,
+} from "../lib/config.js";
+import {
   CurrentForecastStore,
 } from "../lib/weather.js";
 import {
@@ -23,7 +26,7 @@ import {
 } from "./cielo-municipality-view.js";
 
 const navigationStateKey = "cielo";
-const catalogUrl = new URL("../../data/municipalities.json", import.meta.url);
+const catalogUrl = new URL("municipalities.json", dataUrl);
 
 /**
  * @typedef {object} MunicipalityOpenDetail
@@ -73,7 +76,7 @@ export class CieloApp extends HTMLElement {
   #initialized = false;
   #catalogLoadInFlight = false;
   #catalogLoadFailed = false;
-  #currentForecasts = new CurrentForecastStore();
+  #currentForecasts = new CurrentForecastStore(dataUrl);
 
   constructor() {
     super();
