@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="generator" content="{{ generator_identity }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="{{ theme_color }}">
+    <meta name="description" content="{{ description }}">
+    <title>{{ application_name }}</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="./assets/styles/design-tokens.css">
+    <link rel="stylesheet" href="./assets/styles/foundation.css">
+    <link rel="stylesheet" href="./assets/styles/locations.css">
+    <link rel="stylesheet" href="./assets/styles/forecast.css">
+    <link rel="stylesheet" href="./assets/styles/interactions.css">
+    <script type="module" src="./assets/scripts/main.js"></script>
+  </head>
+  <body>
+    <main
+      id="cielo-application"
+      class="cielo-application"
+      data-weather-data-url="{{ weather_data_url }}"
+    >
+{% include "partials/locations-view.html" %}
+{% include "partials/forecast-view.html" %}
+    </main>
+{% include "partials/municipality-row.html" %}
+{% include "partials/hourly-forecast-period.html" %}
+    <!-- Lucide icon license: ./assets/licenses/lucide.txt -->
+    <svg class="cielo-icon-sprite" aria-hidden="true">
+{{ icon_symbols|safe }}
+    </svg>
+    <noscript>Esta página necesita JavaScript para cargar los municipios.</noscript>
+  </body>
+</html>

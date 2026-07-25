@@ -1,0 +1,70 @@
+      <section
+        id="forecast-view"
+        class="cielo-forecast-view"
+        aria-labelledby="municipality-title"
+        aria-describedby="forecast-instructions"
+        hidden
+      >
+        <div class="forecast-screen" tabindex="-1">
+          <header class="forecast-header">
+            <div class="forecast-header-content">
+              <button
+                id="locations-button"
+                class="locations-button"
+                type="button"
+                aria-label="Ver ubicaciones"
+              >
+                <svg class="cielo-icon" aria-hidden="true">
+                  <use href="#cielo-icon-list"></use>
+                </svg>
+              </button>
+              <h1 class="forecast-heading">
+                <button
+                  id="municipality-switcher"
+                  class="location-switcher"
+                  type="button"
+                >
+                  <span id="municipality-title" class="municipality-title-text"></span>
+                </button>
+              </h1>
+            </div>
+            <div class="current-conditions" role="status" aria-live="polite" aria-atomic="true">
+              <span class="current-reading" aria-hidden="true">
+                <span id="current-temperature-value">—</span>
+                <svg
+                  id="current-condition-icon"
+                  class="cielo-icon current-condition-icon"
+                  aria-hidden="true"
+                  hidden
+                >
+                  <use></use>
+                </svg>
+              </span>
+              <span
+                id="current-condition-description"
+                class="current-condition-description"
+                hidden
+              ></span>
+              <span id="current-temperature-announcement" class="visually-hidden">
+                Temperatura actual no disponible
+              </span>
+              <span id="current-conditions-message" class="current-conditions-message">
+                Cargando previsión…
+              </span>
+            </div>
+            <section id="hourly-forecast" class="hourly-forecast" hidden>
+              <h2 id="hourly-forecast-title" class="visually-hidden">Previsión por horas</h2>
+              <div
+                class="hourly-scroll"
+                tabindex="0"
+                aria-labelledby="hourly-forecast-title"
+              >
+                <ul id="hourly-forecast-list" class="hourly-list"></ul>
+              </div>
+            </section>
+            <p id="forecast-instructions" class="visually-hidden">
+              Pulsa el botón de ubicaciones o el nombre para elegir otra ubicación. También puedes usar Atrás.
+            </p>
+          </header>
+        </div>
+      </section>

@@ -1,0 +1,525 @@
+/* Locations search, lists, municipality rows, and empty states. */
+  .cielo-locations-view {
+    position: relative;
+    display: block;
+    height: 100%;
+    overflow-y: auto;
+    color-scheme: dark;
+    color: var(--cielo-color-text);
+    background: var(--cielo-color-locations-background);
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .cielo-locations-view[data-reordering] {
+    cursor: grabbing;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .locations-search-header {
+    position: sticky;
+    z-index: 5;
+    top: 0;
+    padding: calc(0.8rem + env(safe-area-inset-top)) var(--cielo-space-4) 0.8rem;
+    background: var(--cielo-color-locations-background);
+  }
+
+  .search-row {
+    display: flex;
+    align-items: center;
+    gap: var(--cielo-space-3);
+    width: 100%;
+    max-width: var(--cielo-content-width);
+    margin-inline: auto;
+  }
+
+  .search-control {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .search-icon {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 0.9rem;
+    width: 1.15rem;
+    height: 1.15rem;
+    color: var(--cielo-color-muted);
+    transform: translateY(-50%);
+  }
+
+  .cielo-locations-view input {
+    width: 100%;
+    min-height: 3rem;
+    padding: 0.7rem 3.35rem 0.7rem 2.65rem;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: var(--cielo-radius-control);
+    outline: none;
+    outline-offset: 0.12rem;
+    color: var(--cielo-color-text);
+    background: transparent;
+    font: inherit;
+    font-size: 1rem;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .cielo-locations-view input::-webkit-search-cancel-button {
+    display: none;
+    -webkit-appearance: none;
+  }
+
+  .cielo-locations-view input:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .cielo-locations-view input::placeholder {
+    color: var(--cielo-color-muted);
+    font-size: 1rem;
+    opacity: 1;
+  }
+
+  .cielo-locations-view input:disabled {
+    opacity: 0.58;
+  }
+
+  .clear-search-button {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    display: grid;
+    width: var(--cielo-touch-target);
+    height: var(--cielo-touch-target);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    outline: none;
+    color: var(--cielo-color-muted);
+    background: transparent;
+    cursor: pointer;
+    place-items: center;
+    transform: translateY(-50%);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .clear-search-button .cielo-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  .clear-search-button:focus-visible,
+  .empty-search-button:focus-visible,
+  .catalog-retry-button:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .locations-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    max-width: var(--cielo-content-width);
+    min-height: calc(100% - 4.6rem - env(safe-area-inset-top));
+    margin-inline: auto;
+    padding: 0.15rem var(--cielo-space-4) calc(2rem + env(safe-area-inset-bottom));
+  }
+
+  .locations-status {
+    min-height: 1.25rem;
+    margin: 0;
+    padding: 0.35rem 0 var(--cielo-space-3);
+    color: var(--cielo-color-muted);
+    font-size: var(--cielo-font-size-small);
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .catalog-retry-button {
+    align-self: center;
+    min-height: var(--cielo-touch-target);
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: var(--cielo-radius-pill);
+    outline: none;
+    outline-offset: 0.15rem;
+    color: var(--cielo-color-text);
+    background: transparent;
+    font-weight: 650;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .catalog-retry-button[aria-disabled="true"] {
+    cursor: wait;
+    opacity: 0.58;
+  }
+
+  .municipality-list {
+    display: grid;
+    gap: var(--cielo-space-2);
+    grid-template-columns: minmax(0, 1fr);
+    background: transparent;
+  }
+
+  .reorder-placeholder {
+    min-height: var(--cielo-row-height);
+    border: 1px dashed rgb(252 252 250 / 28%);
+    border-radius: 1rem;
+    background: rgb(252 252 250 / 4%);
+  }
+
+  .cielo-municipality-row[data-reorder-active="true"] {
+    position: fixed;
+    z-index: 20;
+    top: var(--reorder-top);
+    left: var(--reorder-left);
+    width: var(--reorder-width);
+    height: var(--reorder-height);
+    border-radius: 1rem;
+    box-shadow: 0 0.85rem 1.8rem rgb(13 34 50 / 34%);
+    pointer-events: none;
+    transform: scale(1.015);
+    transform-origin: center;
+    transition:
+      box-shadow 120ms ease-out,
+      transform 120ms ease-out;
+  }
+
+  .empty-state {
+    display: grid;
+    justify-items: center;
+    gap: var(--cielo-space-3);
+    min-height: 18rem;
+    padding: clamp(2.5rem, 8vh, 4.5rem) 1.35rem;
+    color: var(--cielo-color-muted);
+    text-align: center;
+    align-content: center;
+  }
+
+  .municipality-list:empty {
+    display: none;
+  }
+
+  .empty-state-icon {
+    width: 3.25rem;
+    height: 3.25rem;
+    padding: 0.8rem;
+    border-radius: 50%;
+    color: var(--cielo-color-accent);
+    background: var(--cielo-color-surface);
+  }
+
+  .empty-state h2,
+  .empty-state p {
+    margin: 0;
+  }
+
+  .empty-state h2 {
+    color: var(--cielo-color-text);
+    font-size: 1.2rem;
+    line-height: 1.25;
+  }
+
+  .empty-state p {
+    max-width: 24rem;
+    line-height: 1.5;
+  }
+
+  .empty-search-button {
+    min-height: var(--cielo-touch-target);
+    padding: 0.65rem 1.05rem;
+    border: 1px solid rgb(252 252 250 / 26%);
+    border-radius: var(--cielo-radius-pill);
+    outline: none;
+    outline-offset: 0.15rem;
+    color: var(--cielo-color-locations-background);
+    background: var(--cielo-color-accent);
+    font-weight: 720;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .search-overflow-status {
+    margin: 0;
+    padding: 1rem 0 0.25rem;
+    color: var(--cielo-color-muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .source-attribution {
+    margin: auto 0 0;
+    padding-top: 1.5rem;
+    color: var(--cielo-color-muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .source-attribution-line {
+    display: block;
+  }
+
+  .source-attribution time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cielo-locations-view button:active {
+    opacity: 0.78;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .cielo-locations-view input:hover {
+      border-color: rgb(252 252 250 / 30%);
+    }
+
+    .clear-search-button:hover {
+      color: var(--cielo-color-text);
+      background: var(--cielo-color-surface);
+    }
+
+    .empty-search-button:hover,
+    .catalog-retry-button:hover {
+      filter: brightness(1.08);
+    }
+  }
+
+  @media (orientation: landscape) and (max-height: 34rem) {
+    .empty-state {
+      grid-template:
+        "icon title action" auto
+        "icon copy action" auto
+        / auto minmax(0, 1fr) auto;
+      min-height: 0;
+      padding: 1.25rem 0.5rem;
+      column-gap: var(--cielo-space-4);
+      row-gap: var(--cielo-space-1);
+      justify-items: start;
+      text-align: left;
+    }
+
+    .empty-state-icon {
+      grid-area: icon;
+      align-self: center;
+    }
+
+    .empty-state h2 {
+      grid-area: title;
+    }
+
+    .empty-state p {
+      grid-area: copy;
+    }
+
+    .empty-search-button {
+      grid-area: action;
+      align-self: center;
+    }
+  }
+
+  @media (min-width: 48rem) {
+    .locations-search-header {
+      padding-top: calc(1.25rem + env(safe-area-inset-top));
+    }
+
+    .locations-content {
+      min-height: calc(100% - 5.05rem - env(safe-area-inset-top));
+      padding-top: 0.55rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cielo-municipality-row[data-reorder-active="true"] {
+      transition-duration: 1ms;
+    }
+  }
+
+
+  .cielo-municipality-row {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--cielo-row-height);
+    --row-action-gap: 10px;
+    --row-action-size: 44px;
+    --row-action-width: 64px;
+  }
+
+  .municipality-row-content {
+    position: relative;
+    min-height: var(--cielo-row-height);
+    overflow: hidden;
+    background: transparent;
+  }
+
+  .cielo-municipality-row button {
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .open-button {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: var(--cielo-row-height);
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: 1rem;
+    outline: none;
+    outline-offset: -0.2rem;
+    color: var(--cielo-color-text);
+    background: transparent;
+    text-align: left;
+  }
+
+  .open-button:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .open-button.saved {
+    transform: translateX(var(--row-offset, 0));
+    transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    touch-action: pan-y;
+  }
+
+  .cielo-municipality-row[data-dragging="true"] .open-button.saved {
+    transition: none;
+  }
+
+  .cielo-municipality-row[data-reordering="true"] .open-button.saved {
+    border-color: rgb(252 252 250 / 34%);
+    background: var(--cielo-color-surface);
+    transition: none;
+  }
+
+  .municipality-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .row-current-conditions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--cielo-space-2);
+    margin-left: var(--cielo-space-3);
+  }
+
+  .cielo-municipality-row[data-mode="result"] .row-current-conditions,
+  .cielo-municipality-row[data-mode="result"] .remove-button {
+    display: none;
+  }
+
+  .condition-icon {
+    width: 1.7rem;
+    height: 1.7rem;
+  }
+
+  .temperature {
+    flex: 0 0 auto;
+    font-size: clamp(1.65rem, 7vw, 2rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 540;
+    letter-spacing: -0.045em;
+    line-height: 1;
+  }
+
+  .municipality-name,
+  .municipality-province {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .municipality-name {
+    font-size: var(--cielo-font-size-title);
+    font-weight: 660;
+    line-height: 1.25;
+  }
+
+  .municipality-province {
+    margin-top: 0.12rem;
+    color: var(--cielo-color-muted);
+    font-size: var(--cielo-font-size-small);
+  }
+
+  .remove-button {
+    position: absolute;
+    z-index: 0;
+    top: 50%;
+    right: calc(var(--row-action-gap) - var(--row-action-width));
+    display: grid;
+    width: var(--row-action-size);
+    height: var(--row-action-size);
+    padding: 0;
+    border: 1px solid rgb(255 255 255 / 28%);
+    border-radius: 50%;
+    outline: none;
+    outline-offset: 0.12rem;
+    color: var(--cielo-color-on-destructive);
+    background: var(--cielo-color-destructive);
+    box-shadow: 0 0.2rem 0.45rem rgb(50 7 14 / 24%);
+    opacity: 0;
+    place-items: center;
+    transform:
+      translateY(-50%)
+      translateX(var(--row-offset, 0))
+      scale(0.82);
+    transition:
+      opacity 140ms ease-out,
+      transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .cielo-municipality-row[data-action-open="true"] .remove-button {
+    opacity: 1;
+    transform:
+      translateY(-50%)
+      translateX(var(--row-offset, 0))
+      scale(1);
+  }
+
+  .cielo-municipality-row[data-dragging="true"] .remove-button {
+    opacity: 1;
+    transform:
+      translateY(-50%)
+      translateX(var(--row-offset, 0))
+      scale(1);
+    transition: none;
+  }
+
+  .remove-button:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .remove-button .cielo-icon {
+    width: 1.3rem;
+    height: 1.3rem;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .open-button:hover {
+      border-color: rgb(252 252 250 / 30%);
+      background: var(--cielo-color-surface);
+    }
+
+    .remove-button:hover {
+      filter: brightness(1.08);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .open-button.saved,
+    .remove-button {
+      transition-duration: 1ms;
+    }
+  }

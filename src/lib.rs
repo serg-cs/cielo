@@ -10,8 +10,8 @@ use crate::{
 };
 
 mod aemet;
-mod build;
 pub mod cli;
+mod generation;
 
 const API_KEY_ENV: &str = "AEMET_API_KEY";
 
@@ -34,11 +34,13 @@ pub async fn run(cli: Cli) -> Result<()> {
     let Command::Build(args) = cli.command;
     match args.target {
         BuildTarget::App(args) => {
-            build::build_app(&args.output_dir, &args.data_url)?;
+            let summary = generation::generate_application(&args.output, &args.data)?;
             info!(
-                data_url = args.data_url,
-                output_dir = %args.output_dir.display(),
-                "application shell built"
+                data_url = args.data,
+                output = %args.output.display(),
+                files = summary.files,
+                bytes = summary.bytes,
+                "app generated"
             );
         }
         BuildTarget::Data(args) => build_data(&args).await?,
@@ -57,12 +59,14 @@ async fn build_data(args: &BuildDataArgs) -> Result<()> {
 
     // Collect and publish one complete data snapshot.
     let client = AemetClient::new(api_key)?;
-    let summary = build::build_data(&client, &args.output_dir).await?;
+    let summary = generation::generate_weather_data(&client, &args.output).await?;
     info!(
         municipalities = summary.municipalities,
-        temperature_files = summary.temperature_files,
-        output_dir = %args.output_dir.display(),
-        "weather data built"
+        forecast_files = summary.forecast_files,
+        files = summary.files,
+        bytes = summary.bytes,
+        output = %args.output.display(),
+        "weather data generated"
     );
 
     Ok(())

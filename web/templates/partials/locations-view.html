@@ -1,0 +1,77 @@
+      <section
+        id="locations-view"
+        class="cielo-locations-view"
+        aria-labelledby="locations-title"
+      >
+        <h1 id="locations-title" class="visually-hidden">Ubicaciones</h1>
+        <header class="locations-search-header">
+          <div class="search-row">
+            <label class="visually-hidden" for="municipality-search">Buscar municipio</label>
+            <div class="search-control">
+              <svg class="cielo-icon search-icon" aria-hidden="true">
+                <use href="#cielo-icon-search"></use>
+              </svg>
+              <input
+                id="municipality-search"
+                type="search"
+                autocomplete="off"
+                autocapitalize="none"
+                autocorrect="off"
+                enterkeyhint="search"
+                placeholder="Buscar municipio"
+                spellcheck="false"
+                aria-autocomplete="none"
+                disabled
+              >
+              <button
+                id="clear-search"
+                class="clear-search-button"
+                type="button"
+                aria-label="Cerrar búsqueda"
+                hidden
+              >
+                <svg class="cielo-icon" aria-hidden="true">
+                  <use href="#cielo-icon-circle-x"></use>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </header>
+        <div class="locations-content">
+          <p id="catalog-status" class="locations-status" role="status">Cargando municipios…</p>
+          <button
+            id="catalog-retry"
+            class="catalog-retry-button"
+            type="button"
+            hidden
+          >
+            Reintentar
+          </button>
+          <section id="saved-section" aria-label="Mis ubicaciones">
+            <div id="empty-guidance" class="empty-state" hidden>
+              <svg class="cielo-icon empty-state-icon" aria-hidden="true">
+                <use href="#cielo-icon-map-pin"></use>
+              </svg>
+              <h2>Añade tu primera ubicación</h2>
+              <p>Busca un municipio para consultarlo y tenerlo siempre a mano.</p>
+              <button id="empty-search" class="empty-search-button" type="button">
+                Buscar municipio
+              </button>
+            </div>
+            <div id="saved-list" class="municipality-list" role="list" aria-label="Mis ubicaciones"></div>
+          </section>
+          <section id="results-section" aria-label="Resultados" hidden>
+            <p id="search-status" class="locations-status" role="status" hidden></p>
+            <div id="results-list" class="municipality-list" role="list" aria-label="Resultados"></div>
+            <p id="search-overflow-status" class="search-overflow-status" hidden></p>
+          </section>
+          <p class="source-attribution">
+            <span class="source-attribution-line">Fuente: AEMET</span>
+            <span id="source-update" class="source-attribution-line" hidden>
+              Última actualización:
+              <time id="source-updated-at"></time>
+            </span>
+          </p>
+          <p id="reorder-announcement" class="visually-hidden" role="status" aria-live="polite"></p>
+        </div>
+      </section>

@@ -1,0 +1,30 @@
+/* Application-wide design tokens and browser theme defaults. */
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  color: #fcfcfa;
+  background: #285b78;
+  font-synthesis: none;
+  --cielo-color-accent: #78dce8;
+  --cielo-color-border: rgb(252 252 250 / 18%);
+  --cielo-color-destructive: #ff6188;
+  --cielo-color-focus: #ffd866;
+  --cielo-color-locations-background: #285b78;
+  --cielo-color-forecast-background: #285b78;
+  --cielo-color-muted: #d2dfe8;
+  --cielo-color-on-destructive: #203f5a;
+  --cielo-color-surface: rgb(252 252 250 / 6%);
+  --cielo-color-text: #fcfcfa;
+  --cielo-content-width: 38rem;
+  --cielo-focus-outline: 0.18rem solid var(--cielo-color-focus);
+  --cielo-font-size-small: 0.875rem;
+  --cielo-font-size-title: 1.05rem;
+  --cielo-radius-control: 1.25rem;
+  --cielo-radius-pill: 99rem;
+  --cielo-row-height: 4.1rem;
+  --cielo-space-1: 0.25rem;
+  --cielo-space-2: 0.5rem;
+  --cielo-space-3: 0.75rem;
+  --cielo-space-4: 1rem;
+  --cielo-touch-target: 3rem;
+}

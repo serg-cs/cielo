@@ -1,0 +1,84 @@
+/* Document structure, shared controls, and accessibility utilities. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  background: var(--cielo-color-locations-background);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cielo-application {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--cielo-color-locations-background);
+}
+
+.cielo-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  color: inherit;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  line-height: 1;
+  pointer-events: none;
+  vertical-align: -0.125em;
+}
+
+.cielo-icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+noscript {
+  position: fixed;
+  z-index: 50;
+  inset: auto 1rem calc(1rem + env(safe-area-inset-bottom));
+  padding: 0.8rem 1rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 0.9rem;
+  color: var(--cielo-color-text);
+  background: rgb(122 37 63 / 96%);
+  text-align: center;
+}

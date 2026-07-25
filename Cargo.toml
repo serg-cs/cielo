@@ -8,6 +8,7 @@ pedantic = "deny"
 
 [dependencies]
 anyhow = "1.0.104"
+askama = "0.16.0"
 clap = { version = "4.6.2", features = ["derive"] }
 flate2 = "1.1.9"
 httpdate = "1.0.3"
@@ -23,5 +24,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
+html5ever = "0.39.0"
+lightningcss = { version = "1.0.0-alpha.72", default-features = false }
+markup5ever_rcdom = "0.39.0"
 mockito = "1.7.2"
 predicates = "3.1.4"

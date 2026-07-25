@@ -1,0 +1,285 @@
+/* Current conditions and hourly forecast presentation. */
+  .cielo-forecast-view {
+    position: absolute;
+    z-index: 10;
+    inset: 0;
+    display: block;
+    color-scheme: dark;
+  }
+
+  .forecast-screen {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    outline: none;
+    color: var(--cielo-color-text);
+    background: var(--cielo-color-forecast-background);
+  }
+
+  .forecast-header {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: var(--cielo-content-width);
+    min-height: 5rem;
+    padding: calc(0.8rem + env(safe-area-inset-top)) var(--cielo-space-4) 1rem;
+    margin-inline: auto;
+  }
+
+  .forecast-header-content {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: var(--cielo-touch-target);
+  }
+
+  .forecast-heading {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .locations-button,
+  .location-switcher {
+    border: 0;
+    outline: none;
+    outline-offset: 0.12rem;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .locations-button {
+    display: grid;
+    width: var(--cielo-touch-target);
+    height: var(--cielo-touch-target);
+    padding: 0;
+    border-radius: 50%;
+    place-items: center;
+  }
+
+  .locations-button .cielo-icon {
+    width: 1.2rem;
+    height: 1.2rem;
+  }
+
+  .location-switcher {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 100%;
+    min-height: var(--cielo-touch-target);
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.75rem;
+    font-size: clamp(1.25rem, 5vw, 1.55rem);
+    font-weight: 680;
+    letter-spacing: -0.025em;
+    line-height: 1.1;
+    text-align: left;
+  }
+
+  .locations-button:focus-visible,
+  .location-switcher:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .locations-button:active,
+  .location-switcher:active {
+    opacity: 0.78;
+  }
+
+  .municipality-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: anywhere;
+  }
+
+  .current-conditions {
+    width: 100%;
+    margin-top: 0.55rem;
+  }
+
+  .current-reading {
+    display: flex;
+    align-items: center;
+  }
+
+  .current-condition-icon {
+    width: clamp(4.5rem, 18vw, 6.5rem);
+    height: clamp(4.5rem, 18vw, 6.5rem);
+    margin-left: auto;
+    margin-right: 0.9rem;
+  }
+
+  #current-temperature-value {
+    flex: 0 0 auto;
+    margin-left: 0.9rem;
+    font-size: clamp(6rem, 30vw, 10rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 300;
+    letter-spacing: -0.075em;
+    line-height: 0.9;
+  }
+
+  .current-condition-description {
+    display: block;
+    /* Follow a two-digit reading until the desktop text cap takes over. */
+    max-width: min(18rem, 41.5vw, calc(100% - 1.8rem));
+    margin: 0.65rem 0 0 0.9rem;
+    color: var(--cielo-color-muted);
+    font-size: clamp(0.95rem, 3.5vw, 1.125rem);
+    font-weight: 350;
+    letter-spacing: 0.005em;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .current-conditions-message {
+    display: block;
+    padding: 2.2rem 0.9rem;
+    color: var(--cielo-color-muted);
+    font-size: var(--cielo-font-size-small);
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .hourly-forecast {
+    position: fixed;
+    bottom: calc(1.9rem + env(safe-area-inset-bottom));
+    left: 50%;
+    width: calc(100% - 3.8rem);
+    max-width: calc(var(--cielo-content-width) - 3.8rem);
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .hourly-scroll {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: 1rem;
+    outline: none;
+    outline-offset: -0.2rem;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .hourly-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hourly-scroll:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .hourly-list {
+    display: grid;
+    grid-auto-columns: 4.25rem;
+    grid-auto-flow: column;
+    width: max-content;
+    padding: 0.8rem 0 0.75rem;
+    margin: 0;
+    list-style: none;
+  }
+
+  .hourly-period {
+    display: grid;
+    grid-template-rows: 1.1rem 2rem 1.25rem;
+    gap: 0.35rem;
+    min-width: 0;
+    color: var(--cielo-color-text);
+    place-items: center;
+    scroll-snap-align: start;
+  }
+
+  .hourly-hour {
+    color: var(--cielo-color-muted);
+    font-size: var(--cielo-font-size-small);
+    font-variant-numeric: tabular-nums;
+    grid-row: 1;
+    line-height: 1.1;
+  }
+
+  .hourly-period[data-current="true"] .hourly-hour {
+    color: var(--cielo-color-text);
+    font-weight: 650;
+  }
+
+  .hourly-condition-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    align-self: center;
+    grid-row: 2;
+  }
+
+  .hourly-temperature {
+    font-size: 1rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 560;
+    grid-row: 3;
+    line-height: 1.15;
+  }
+
+  @media (min-width: 48rem) {
+    .forecast-header {
+      padding-top: calc(1.25rem + env(safe-area-inset-top));
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .locations-button:hover,
+    .location-switcher:hover {
+      background: var(--cielo-color-surface);
+    }
+  }
+
+  /* Preserve the mobile reading order while fitting short landscape views. */
+  @media (orientation: landscape) and (max-height: 34rem) {
+    .forecast-screen {
+      overflow-y: auto;
+    }
+
+    .forecast-header {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      padding:
+        calc(0.8rem + env(safe-area-inset-top))
+        max(var(--cielo-space-4), env(safe-area-inset-right))
+        max(0.8rem, env(safe-area-inset-bottom))
+        max(var(--cielo-space-4), env(safe-area-inset-left));
+    }
+
+    .current-conditions {
+      margin-top: 0;
+    }
+
+    .current-condition-icon {
+      width: clamp(3.5rem, 18vh, 4.75rem);
+      height: clamp(3.5rem, 18vh, 4.75rem);
+    }
+
+    #current-temperature-value {
+      font-size: clamp(4.75rem, 26vh, 7rem);
+    }
+
+    .current-condition-description {
+      font-size: clamp(0.9rem, 3.8vh, 1.05rem);
+    }
+
+    .current-conditions-message {
+      padding: 0.9rem 0.5rem;
+    }
+
+    .hourly-forecast {
+      position: static;
+      width: calc(100% - 1.8rem);
+      padding-top: 1rem;
+      margin: auto auto 0;
+      transform: none;
+    }
+  }

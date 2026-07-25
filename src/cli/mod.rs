@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(test)]
 mod tests;
 
-/// Build static weather application artifacts from AEMET `OpenData`.
+/// Build a static weather app and its AEMET data.
 #[derive(Debug, Parser)]
 #[command(name = "cielo", version, about)]
 pub struct Cli {
@@ -17,43 +17,43 @@ pub struct Cli {
 /// Supported CLI operations.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Build a deployable application or data artifact.
+    /// Build the app or its weather data.
     Build(BuildArgs),
 }
 
-/// Arguments for selecting the artifact to build.
+/// Select what to build.
 #[derive(Debug, Args)]
 pub struct BuildArgs {
-    /// Artifact to build.
+    /// Output to build.
     #[command(subcommand)]
     pub target: BuildTarget,
 }
 
-/// Artifacts that can be built.
+/// Supported build outputs.
 #[derive(Debug, Subcommand)]
 pub enum BuildTarget {
-    /// Build the static application shell.
+    /// Build the static app.
     App(BuildAppArgs),
-    /// Build a weather-data snapshot.
+    /// Build the weather data.
     Data(BuildDataArgs),
 }
 
-/// Arguments for building the application shell.
+/// Build options for the app.
 #[derive(Debug, Args)]
 pub struct BuildAppArgs {
-    /// Browser-facing base URL containing the weather data.
-    #[arg(long, value_name = "URL")]
-    pub data_url: String,
+    /// Directory that will contain the generated app.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: PathBuf,
 
-    /// Dedicated directory that will contain the application shell.
-    #[arg(long, value_name = "PATH")]
-    pub output_dir: PathBuf,
+    /// Browser-facing URL containing the weather data.
+    #[arg(short, long, value_name = "URL")]
+    pub data: String,
 }
 
-/// Arguments for building the weather-data snapshot.
+/// Build options for the weather data.
 #[derive(Debug, Args)]
 pub struct BuildDataArgs {
-    /// Dedicated directory that will contain the weather data.
-    #[arg(long, value_name = "PATH")]
-    pub output_dir: PathBuf,
+    /// Directory that will contain the generated weather data.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: PathBuf,
 }

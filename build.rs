@@ -1,4 +1,4 @@
 fn main() {
-    // Rebuild when files are added to or removed from the embedded application.
-    println!("cargo:rerun-if-changed=site");
+    // Rebuild when browser templates or static assets change.
+    println!("cargo:rerun-if-changed=web");
 }

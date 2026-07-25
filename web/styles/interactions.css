@@ -1,0 +1,20 @@
+/* Cross-view interaction states and motion preferences. */
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cielo-municipality-row[data-reorder-active="true"] {
+  touch-action: none;
+}
+
+.cielo-forecast-view[data-active="true"] {
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}

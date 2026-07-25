@@ -1,0 +1,23 @@
+    <template id="municipality-row-template">
+      <div class="cielo-municipality-row" role="listitem">
+        <div class="municipality-row-content">
+          <button class="open-button" type="button">
+            <span class="municipality-summary">
+              <span class="municipality-name"></span>
+              <span class="municipality-province"></span>
+            </span>
+            <span class="row-current-conditions" aria-hidden="true">
+              <span class="temperature">—</span>
+              <svg class="cielo-icon condition-icon" aria-hidden="true" hidden>
+                <use></use>
+              </svg>
+            </span>
+          </button>
+          <button class="remove-button" type="button" title="Eliminar">
+            <svg class="cielo-icon" aria-hidden="true">
+              <use href="#cielo-icon-trash-2"></use>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </template>

@@ -71,27 +71,27 @@ fn parses_and_orders_forecast_temperatures() {
 
     assert_eq!(forecasts.len(), 1);
     assert_eq!(
-        forecasts[0].temperatures,
+        forecasts[0].hourly_forecasts,
         vec![
-            Temperature {
+            HourlyForecast {
                 date: "2026-07-19".to_owned(),
                 hour: 10,
-                celsius: 27,
-                state: SkyState::CloudSun,
+                temperature_celsius: 27,
+                condition: WeatherCondition::CloudSun,
                 description: "Intervalos nubosos".to_owned(),
             },
-            Temperature {
+            HourlyForecast {
                 date: "2026-07-19".to_owned(),
                 hour: 11,
-                celsius: 29,
-                state: SkyState::Moon,
+                temperature_celsius: 29,
+                condition: WeatherCondition::Moon,
                 description: "Despejado".to_owned(),
             },
-            Temperature {
+            HourlyForecast {
                 date: "2026-07-20".to_owned(),
                 hour: 0,
-                celsius: 21,
-                state: SkyState::CloudDrizzle,
+                temperature_celsius: 21,
+                condition: WeatherCondition::CloudDrizzle,
                 description: "Lluvia débil".to_owned(),
             },
         ]
@@ -128,20 +128,20 @@ fn rejects_scalar_sky_state_shape() {
 
 #[test]
 fn maps_every_supported_aemet_condition_code() {
-    let cases: &[(SkyState, &str, &[&str])] = &[
-        (SkyState::Cloud, "cloud", &["14"]),
+    let cases: &[(WeatherCondition, &str, &[&str])] = &[
+        (WeatherCondition::Cloud, "cloud", &["14"]),
         (
-            SkyState::CloudDrizzle,
+            WeatherCondition::CloudDrizzle,
             "cloud-drizzle",
             &["24", "24n", "25", "26"],
         ),
         (
-            SkyState::CloudFog,
+            WeatherCondition::CloudFog,
             "cloud-fog",
             &["81", "81n", "82", "82n", "83", "83n"],
         ),
         (
-            SkyState::CloudLightning,
+            WeatherCondition::CloudLightning,
             "cloud-lightning",
             &[
                 "51", "51n", "52", "52n", "53", "53n", "54", "54n", "61", "61n", "62", "62n", "63",
@@ -149,35 +149,43 @@ fn maps_every_supported_aemet_condition_code() {
             ],
         ),
         (
-            SkyState::CloudMoon,
+            WeatherCondition::CloudMoon,
             "cloud-moon",
             &["12n", "13n", "14n", "17n"],
         ),
         (
-            SkyState::CloudMoonRain,
+            WeatherCondition::CloudMoonRain,
             "cloud-moon-rain",
             &["23n", "25n", "26n", "43n", "44n"],
         ),
         (
-            SkyState::CloudRain,
+            WeatherCondition::CloudRain,
             "cloud-rain",
             &["44", "45", "45n", "46", "46n"],
         ),
         (
-            SkyState::CloudSnow,
+            WeatherCondition::CloudSnow,
             "cloud-snow",
             &["33", "33n", "34", "34n", "35", "35n", "36", "36n"],
         ),
-        (SkyState::CloudSun, "cloud-sun", &["12", "13", "17"]),
-        (SkyState::CloudSunRain, "cloud-sun-rain", &["23", "43"]),
-        (SkyState::Cloudy, "cloudy", &["15", "15n", "16", "16n"]),
-        (SkyState::Moon, "moon", &["11n"]),
+        (WeatherCondition::CloudSun, "cloud-sun", &["12", "13", "17"]),
         (
-            SkyState::Snowflake,
+            WeatherCondition::CloudSunRain,
+            "cloud-sun-rain",
+            &["23", "43"],
+        ),
+        (
+            WeatherCondition::Cloudy,
+            "cloudy",
+            &["15", "15n", "16", "16n"],
+        ),
+        (WeatherCondition::Moon, "moon", &["11n"]),
+        (
+            WeatherCondition::Snowflake,
             "snowflake",
             &["71", "71n", "72", "72n", "73", "73n", "74", "74n"],
         ),
-        (SkyState::Sun, "sun", &["11"]),
+        (WeatherCondition::Sun, "sun", &["11"]),
     ];
 
     let mut mapped_code_count = 0;
@@ -187,7 +195,10 @@ fn maps_every_supported_aemet_condition_code() {
             serde_json::Value::String((*wire_value).to_owned())
         );
         for code in *codes {
-            assert_eq!(SkyState::from_aemet_code(code), Some(*expected_state));
+            assert_eq!(
+                WeatherCondition::from_aemet_code(code),
+                Some(*expected_state)
+            );
             mapped_code_count += 1;
         }
     }
@@ -207,8 +218,14 @@ fn prolongs_latest_earlier_condition_for_missing_hour() {
     .expect("forecast should normalize")
     .expect("forecast should remain included");
 
-    assert_eq!(forecast.temperatures[0].state, SkyState::CloudSun);
-    assert_eq!(forecast.temperatures[0].description, "Intervalos nubosos");
+    assert_eq!(
+        forecast.hourly_forecasts[0].condition,
+        WeatherCondition::CloudSun
+    );
+    assert_eq!(
+        forecast.hourly_forecasts[0].description,
+        "Intervalos nubosos"
+    );
 }
 
 #[test]
@@ -223,8 +240,11 @@ fn uses_closest_later_condition_before_first_available_state() {
     .expect("forecast should normalize")
     .expect("forecast should remain included");
 
-    assert_eq!(forecast.temperatures[0].state, SkyState::Sun);
-    assert_eq!(forecast.temperatures[0].description, "Despejado");
+    assert_eq!(
+        forecast.hourly_forecasts[0].condition,
+        WeatherCondition::Sun
+    );
+    assert_eq!(forecast.hourly_forecasts[0].description, "Despejado");
 }
 
 #[test]
@@ -660,7 +680,7 @@ fn forecast_archive_entries(entries: &[(&str, &str)]) -> Vec<u8> {
 fn normalize_single_day(
     temperatures: &serde_json::Value,
     sky_states: &serde_json::Value,
-) -> Result<Option<Forecast>> {
+) -> Result<Option<MunicipalityForecast>> {
     let document = serde_json::from_value::<ForecastDocument>(serde_json::json!({
         "root": {
             "id": "28079",
