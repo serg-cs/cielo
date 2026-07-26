@@ -1,20 +1,25 @@
-use std::path::Path;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result, bail};
 use askama::Template;
 use include_dir::{Dir, include_dir};
 use reqwest::Url;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::{
     GENERATOR_IDENTITY,
     files::GeneratedFiles,
-    publisher::{OutputKind, create_staging_directory, publish_staging_directory},
+    publisher::{OutputKind, create_staging_directory, publish_application_directory},
 };
 
 const APPLICATION_NAME: &str = "Cielo";
 const APPLICATION_DESCRIPTION: &str = "Municipios con predicción meteorológica de AEMET";
 const APPLICATION_THEME_COLOR: &str = "#285b78";
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 const STYLE_ASSETS: [(&str, &str); 5] = [
     (
@@ -98,6 +103,16 @@ struct ApplicationDocumentTemplate<'a> {
     theme_color: &'a str,
     weather_data_url: &'a str,
     icon_symbols: &'a str,
+    manifest_url: &'a str,
+    favicon_url: &'a str,
+    apple_touch_icon_url: &'a str,
+    design_tokens_stylesheet_url: &'a str,
+    foundation_stylesheet_url: &'a str,
+    locations_stylesheet_url: &'a str,
+    forecast_stylesheet_url: &'a str,
+    interactions_stylesheet_url: &'a str,
+    main_script_url: &'a str,
+    icon_license_url: &'a str,
 }
 
 #[derive(Serialize)]
@@ -119,10 +134,16 @@ struct WebApplicationManifest<'a> {
 
 #[derive(Serialize)]
 struct ManifestIcon<'a> {
-    src: &'a str,
+    src: String,
     sizes: &'a str,
     r#type: &'a str,
     purpose: &'a str,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct HashedAsset {
+    pub(super) output_path: String,
+    pub(super) bytes: Vec<u8>,
 }
 
 pub(crate) fn generate_application(
@@ -140,33 +161,31 @@ pub(crate) fn generate_application(
         files: files.file_count(),
         bytes: files.total_bytes(),
     };
-    publish_staging_directory(&staging, &output_directory, OutputKind::App)?;
+    publish_application_directory(&staging, &output_directory, &files)?;
     Ok(summary)
 }
 
 fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let mut files = GeneratedFiles::default();
-    let icon_symbols = build_icon_symbols()?;
-    let index = ApplicationDocumentTemplate {
-        application_name: APPLICATION_NAME,
-        description: APPLICATION_DESCRIPTION,
-        generator_identity: GENERATOR_IDENTITY,
-        theme_color: APPLICATION_THEME_COLOR,
-        weather_data_url,
-        icon_symbols: &icon_symbols,
-    }
-    .render()
-    .context("failed to render application document")?;
-    files.insert("index.html", terminated_text(index))?;
-    files.insert("favicon.svg", source_file("favicon.svg")?)?;
-    files.insert("assets/licenses/lucide.txt", source_file("icons/LICENSE")?)?;
+    let mut asset_paths = BTreeMap::new();
 
+    // Hash independent static assets before generating files that reference them.
     for (source, destination) in STYLE_ASSETS
         .into_iter()
-        .chain(SCRIPT_ASSETS)
         .chain(APPLICATION_ICON_ASSETS)
+        .chain([
+            ("favicon.svg", "favicon.svg"),
+            ("icons/LICENSE", "assets/licenses/lucide.txt"),
+        ])
     {
-        files.insert(destination, source_file(source)?)?;
+        let output_path = insert_hashed_asset(&mut files, destination, source_file(source)?)?;
+        asset_paths.insert(destination, output_path);
+    }
+
+    // Rewrite module references dependency-first so each name hashes its final bytes.
+    for (logical_path, asset) in build_script_assets()? {
+        asset_paths.insert(logical_path, asset.output_path.clone());
+        files.insert(asset.output_path, asset.bytes)?;
     }
 
     let manifest = WebApplicationManifest {
@@ -184,19 +203,19 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
         theme_color: APPLICATION_THEME_COLOR,
         icons: vec![
             ManifestIcon {
-                src: "./assets/icons/application-192.png",
+                src: asset_url(&asset_paths, "assets/icons/application-192.png")?,
                 sizes: "192x192",
                 r#type: "image/png",
                 purpose: "any",
             },
             ManifestIcon {
-                src: "./assets/icons/application-512.png",
+                src: asset_url(&asset_paths, "assets/icons/application-512.png")?,
                 sizes: "512x512",
                 r#type: "image/png",
                 purpose: "any",
             },
             ManifestIcon {
-                src: "./assets/icons/application-maskable-512.png",
+                src: asset_url(&asset_paths, "assets/icons/application-maskable-512.png")?,
                 sizes: "512x512",
                 r#type: "image/png",
                 purpose: "maskable",
@@ -206,8 +225,231 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let mut manifest_bytes =
         serde_json::to_vec_pretty(&manifest).context("failed to encode web manifest")?;
     manifest_bytes.push(b'\n');
-    files.insert("manifest.webmanifest", manifest_bytes)?;
+    let manifest_url = format!(
+        "./{}",
+        insert_hashed_asset(&mut files, "manifest.webmanifest", manifest_bytes)?
+    );
+
+    // Render the stable entry point only after every immutable path is known.
+    let icon_symbols = build_icon_symbols()?;
+    let favicon_url = asset_url(&asset_paths, "favicon.svg")?;
+    let apple_touch_icon_url = asset_url(&asset_paths, "assets/icons/apple-touch-icon.png")?;
+    let design_tokens_stylesheet_url = asset_url(&asset_paths, "assets/styles/design-tokens.css")?;
+    let foundation_stylesheet_url = asset_url(&asset_paths, "assets/styles/foundation.css")?;
+    let locations_stylesheet_url = asset_url(&asset_paths, "assets/styles/locations.css")?;
+    let forecast_stylesheet_url = asset_url(&asset_paths, "assets/styles/forecast.css")?;
+    let interactions_stylesheet_url = asset_url(&asset_paths, "assets/styles/interactions.css")?;
+    let main_script_url = asset_url(&asset_paths, "assets/scripts/main.js")?;
+    let icon_license_url = asset_url(&asset_paths, "assets/licenses/lucide.txt")?;
+    let index = ApplicationDocumentTemplate {
+        application_name: APPLICATION_NAME,
+        description: APPLICATION_DESCRIPTION,
+        generator_identity: GENERATOR_IDENTITY,
+        theme_color: APPLICATION_THEME_COLOR,
+        weather_data_url,
+        icon_symbols: &icon_symbols,
+        manifest_url: &manifest_url,
+        favicon_url: &favicon_url,
+        apple_touch_icon_url: &apple_touch_icon_url,
+        design_tokens_stylesheet_url: &design_tokens_stylesheet_url,
+        foundation_stylesheet_url: &foundation_stylesheet_url,
+        locations_stylesheet_url: &locations_stylesheet_url,
+        forecast_stylesheet_url: &forecast_stylesheet_url,
+        interactions_stylesheet_url: &interactions_stylesheet_url,
+        main_script_url: &main_script_url,
+        icon_license_url: &icon_license_url,
+    }
+    .render()
+    .context("failed to render application document")?;
+    files.insert("index.html", terminated_text(index))?;
     Ok(files)
+}
+
+fn insert_hashed_asset(
+    files: &mut GeneratedFiles,
+    logical_path: &str,
+    bytes: Vec<u8>,
+) -> Result<String> {
+    let output_path = hashed_output_path(logical_path, &bytes)?;
+    files.insert(&output_path, bytes)?;
+    Ok(output_path)
+}
+
+fn hashed_output_path(logical_path: &str, bytes: &[u8]) -> Result<String> {
+    let path = Path::new(logical_path);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .context("asset filename stem is not valid UTF-8")?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .context("asset filename must have a UTF-8 extension")?;
+    let encoded_digest = content_hash(bytes);
+    path.with_file_name(format!("{stem}.{encoded_digest}.{extension}"))
+        .to_str()
+        .map(str::to_owned)
+        .context("hashed asset path is not valid UTF-8")
+}
+
+pub(super) fn content_hash(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        encoded.push(char::from(HEX_DIGITS[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX_DIGITS[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn asset_url(asset_paths: &BTreeMap<&str, String>, logical_path: &str) -> Result<String> {
+    asset_paths
+        .get(logical_path)
+        .map(|path| browser_asset_url(path))
+        .with_context(|| format!("generated asset path is missing: {logical_path}"))
+}
+
+pub(super) fn browser_asset_url(output_path: &str) -> String {
+    format!("./{}", normalized_logical_path(output_path))
+}
+
+pub(super) fn normalized_logical_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn build_script_assets() -> Result<BTreeMap<&'static str, HashedAsset>> {
+    let sources = SCRIPT_ASSETS
+        .into_iter()
+        .map(|(source_path, logical_path)| {
+            let source = String::from_utf8(source_file(source_path)?)
+                .with_context(|| format!("script source is not valid UTF-8: {source_path}"))?;
+            Ok((logical_path, source))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    build_script_assets_from_sources(&sources)
+}
+
+pub(super) fn build_script_assets_from_sources(
+    sources: &BTreeMap<&'static str, String>,
+) -> Result<BTreeMap<&'static str, HashedAsset>> {
+    let mut built = BTreeMap::new();
+    let mut visiting = BTreeSet::new();
+
+    for logical_path in sources.keys() {
+        build_script_asset(logical_path, sources, &mut built, &mut visiting)?;
+    }
+    Ok(built)
+}
+
+fn build_script_asset(
+    logical_path: &'static str,
+    sources: &BTreeMap<&'static str, String>,
+    built: &mut BTreeMap<&'static str, HashedAsset>,
+    visiting: &mut BTreeSet<&'static str>,
+) -> Result<()> {
+    if built.contains_key(logical_path) {
+        return Ok(());
+    }
+    if !visiting.insert(logical_path) {
+        bail!("JavaScript module graph contains a cycle at {logical_path}");
+    }
+
+    let source = sources
+        .get(logical_path)
+        .with_context(|| format!("JavaScript module source is missing: {logical_path}"))?;
+    let mut rendered = source.clone();
+
+    // Replace every known local specifier, including references used by JSDoc.
+    for logical_specifier in local_script_specifiers(source) {
+        let dependency_path = resolve_script_dependency(logical_path, &logical_specifier, sources)?;
+        build_script_asset(dependency_path, sources, built, visiting)?;
+        let dependency = built
+            .get(&dependency_path)
+            .context("hashed JavaScript dependency is missing")?;
+        let hashed_specifier = script_specifier(logical_path, &dependency.output_path)?;
+        rendered = rendered.replace(&logical_specifier, &hashed_specifier);
+    }
+
+    visiting.remove(logical_path);
+    let bytes = rendered.into_bytes();
+    built.insert(
+        logical_path,
+        HashedAsset {
+            output_path: hashed_output_path(logical_path, &bytes)?,
+            bytes,
+        },
+    );
+    Ok(())
+}
+
+fn local_script_specifiers(source: &str) -> BTreeSet<String> {
+    let mut specifiers = BTreeSet::new();
+    for (quote_position, quote) in source.char_indices() {
+        if !matches!(quote, '"' | '\'') {
+            continue;
+        }
+        let value_start = quote_position + quote.len_utf8();
+        let remaining = &source[value_start..];
+        if !remaining.starts_with("./") {
+            continue;
+        }
+        let Some(value_end) = remaining.find(quote) else {
+            continue;
+        };
+        let specifier = &remaining[..value_end];
+        if Path::new(specifier)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("js"))
+        {
+            specifiers.insert(specifier.to_owned());
+        }
+    }
+    specifiers
+}
+
+fn resolve_script_dependency(
+    importer_path: &str,
+    specifier: &str,
+    sources: &BTreeMap<&'static str, String>,
+) -> Result<&'static str> {
+    let relative_path = specifier
+        .strip_prefix("./")
+        .context("local JavaScript specifier must start with './'")?;
+    let dependency = Path::new(importer_path)
+        .parent()
+        .context("JavaScript importer does not have an output directory")?
+        .join(relative_path);
+    if dependency
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        bail!("JavaScript module specifier contains an unsupported component: {specifier}");
+    }
+    let dependency = dependency
+        .to_str()
+        .context("JavaScript module specifier is not valid UTF-8")?;
+    let dependency = normalized_logical_path(dependency);
+    sources
+        .get_key_value(dependency.as_str())
+        .map(|(logical_path, _)| *logical_path)
+        .with_context(|| {
+            format!("JavaScript module {importer_path} references missing local module {specifier}")
+        })
+}
+
+fn script_specifier(importer_path: &str, dependency_path: &str) -> Result<String> {
+    let importer = Path::new(importer_path);
+    let dependency = Path::new(dependency_path);
+    if importer.parent() != dependency.parent() {
+        bail!(
+            "JavaScript modules must share an output directory: {importer_path} imports {dependency_path}"
+        );
+    }
+    let filename = dependency
+        .file_name()
+        .and_then(|value| value.to_str())
+        .context("JavaScript module filename is not valid UTF-8")?;
+    Ok(format!("./{filename}"))
 }
 
 fn build_icon_symbols() -> Result<String> {

@@ -1,11 +1,13 @@
 # Cielo
 
-Cielo builds a static weather app and AEMET forecast data.
+Cielo generates a static weather using AEMET forecast data.
 
-## Build
+## Usage
 
-```nu
+```sh
 cargo run -- build app --output dist/app --data ../data/
+```
 
+```sh
 cargo run -- build data --output dist/data
 ```

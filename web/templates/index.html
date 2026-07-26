@@ -7,15 +7,15 @@
     <meta name="theme-color" content="{{ theme_color }}">
     <meta name="description" content="{{ description }}">
     <title>{{ application_name }}</title>
-    <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png">
-    <link rel="stylesheet" href="./assets/styles/design-tokens.css">
-    <link rel="stylesheet" href="./assets/styles/foundation.css">
-    <link rel="stylesheet" href="./assets/styles/locations.css">
-    <link rel="stylesheet" href="./assets/styles/forecast.css">
-    <link rel="stylesheet" href="./assets/styles/interactions.css">
-    <script type="module" src="./assets/scripts/main.js"></script>
+    <link rel="manifest" href="{{ manifest_url }}">
+    <link rel="icon" href="{{ favicon_url }}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{{ apple_touch_icon_url }}">
+    <link rel="stylesheet" href="{{ design_tokens_stylesheet_url }}">
+    <link rel="stylesheet" href="{{ foundation_stylesheet_url }}">
+    <link rel="stylesheet" href="{{ locations_stylesheet_url }}">
+    <link rel="stylesheet" href="{{ forecast_stylesheet_url }}">
+    <link rel="stylesheet" href="{{ interactions_stylesheet_url }}">
+    <script type="module" src="{{ main_script_url }}"></script>
   </head>
   <body>
     <main
@@ -28,7 +28,7 @@
     </main>
 {% include "partials/municipality-row.html" %}
 {% include "partials/hourly-forecast-period.html" %}
-    <!-- Lucide icon license: ./assets/licenses/lucide.txt -->
+    <!-- Lucide icon license: {{ icon_license_url }} -->
     <svg class="cielo-icon-sprite" aria-hidden="true">
 {{ icon_symbols|safe }}
     </svg>

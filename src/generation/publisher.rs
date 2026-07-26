@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tempfile::{Builder, TempDir};
 use tracing::warn;
 
-use super::GENERATOR_IDENTITY;
+use super::{GENERATOR_IDENTITY, files::GeneratedFiles};
 
 const APP_GENERATOR_DECLARATION: &str = r#"<meta name="generator" content="cielo">"#;
 const AEMET_SOURCE_NAME: &str = "AEMET";
@@ -117,6 +117,100 @@ pub(super) fn publish_staging_directory(
         warn!(%error, "failed to remove previous generated output backup");
     }
     Ok(())
+}
+
+pub(super) fn publish_application_directory(
+    staging: &TempDir,
+    output_directory: &Path,
+    files: &GeneratedFiles,
+) -> Result<()> {
+    // Validate the destination and stable entry point before publishing.
+    validate_existing_output(output_directory, OutputKind::App)?;
+    if !files.contains("index.html") {
+        bail!("generated application does not contain index.html");
+    }
+
+    // Publish a missing or empty output through the recoverable directory swap.
+    if !output_directory.exists()
+        || fs::read_dir(output_directory)
+            .with_context(|| {
+                format!(
+                    "failed to read application output {}",
+                    output_directory.display()
+                )
+            })?
+            .next()
+            .is_none()
+    {
+        return publish_staging_directory(staging, output_directory, OutputKind::App);
+    }
+
+    // Append new hashed files while preserving every prior version.
+    for (relative_path, bytes) in files
+        .iter()
+        .filter(|(relative_path, _)| *relative_path != Path::new("index.html"))
+    {
+        append_application_file(staging.path(), output_directory, relative_path, bytes)?;
+    }
+
+    // Atomically replace the entry point after all referenced assets are available.
+    fs::rename(
+        staging.path().join("index.html"),
+        output_directory.join("index.html"),
+    )
+    .context("failed to publish application index")
+}
+
+fn append_application_file(
+    staging_directory: &Path,
+    output_directory: &Path,
+    relative_path: &Path,
+    bytes: &[u8],
+) -> Result<()> {
+    let destination = output_directory.join(relative_path);
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                bail!(
+                    "generated application asset is not a regular file: {}",
+                    destination.display()
+                );
+            }
+            if fs::read(&destination).with_context(|| {
+                format!(
+                    "failed to read generated application asset {}",
+                    destination.display()
+                )
+            })? != bytes
+            {
+                bail!(
+                    "generated application asset has conflicting content: {}",
+                    destination.display()
+                );
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = destination
+                .parent()
+                .context("generated asset does not have a parent directory")?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create generated directory {}", parent.display())
+            })?;
+            fs::rename(staging_directory.join(relative_path), &destination).with_context(|| {
+                format!(
+                    "failed to publish generated application asset {}",
+                    destination.display()
+                )
+            })
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "failed to inspect generated application asset {}",
+                destination.display()
+            )
+        }),
+    }
 }
 
 fn validate_output_directory(path: &Path, output_kind: OutputKind) -> Result<PathBuf> {

@@ -34,6 +34,16 @@ impl GeneratedFiles {
         self.files.values().map(Vec::len).sum()
     }
 
+    pub(super) fn contains(&self, path: impl AsRef<Path>) -> bool {
+        self.files.contains_key(path.as_ref())
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = (&Path, &[u8])> {
+        self.files
+            .iter()
+            .map(|(path, bytes)| (path.as_path(), bytes.as_slice()))
+    }
+
     pub(super) fn write_to(&self, output_directory: &Path) -> Result<()> {
         for (relative_path, bytes) in &self.files {
             let path = output_directory.join(relative_path);

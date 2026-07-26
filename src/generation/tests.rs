@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::Path,
 };
@@ -10,9 +10,15 @@ use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use super::{
-    application::{build_icon_symbol, generate_application, normalize_weather_data_url},
+    application::{
+        browser_asset_url, build_icon_symbol, build_script_assets_from_sources, content_hash,
+        generate_application, normalize_weather_data_url, normalized_logical_path,
+    },
     files::GeneratedFiles,
-    publisher::{OutputKind, create_staging_directory, publish_staging_directory},
+    publisher::{
+        OutputKind, create_staging_directory, publish_application_directory,
+        publish_staging_directory,
+    },
     weather_data::{WeatherDataStatistics, build_snapshot, write_weather_data_files},
 };
 
@@ -35,6 +41,20 @@ fn normalizes_supported_weather_data_urls() {
             expected
         );
     }
+}
+
+#[test]
+fn normalizes_browser_asset_url_separators() {
+    assert_eq!(
+        normalized_logical_path(r"assets\scripts\dependency.js"),
+        "assets/scripts/dependency.js"
+    );
+    assert_eq!(
+        browser_asset_url(
+            r"assets\styles\foundation.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.css"
+        ),
+        "./assets/styles/foundation.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.css"
+    );
 }
 
 #[test]
@@ -95,6 +115,87 @@ fn generated_files_track_content_and_reject_unsafe_paths() {
 }
 
 #[test]
+fn rewrites_and_hashes_javascript_dependency_graphs() {
+    let sources = BTreeMap::from([
+        (
+            "assets/scripts/main.js",
+            "import { value } from \"./dependency.js\";\nconsole.log(value);\n".to_owned(),
+        ),
+        (
+            "assets/scripts/dependency.js",
+            "export const value = 1;\n".to_owned(),
+        ),
+        (
+            "assets/scripts/unrelated.js",
+            "export const unrelated = true;\n".to_owned(),
+        ),
+    ]);
+    let first =
+        build_script_assets_from_sources(&sources).expect("script graph should build successfully");
+    let dependency = first
+        .get("assets/scripts/dependency.js")
+        .expect("dependency should be built");
+    let main = first
+        .get("assets/scripts/main.js")
+        .expect("entry module should be built");
+    assert!(
+        String::from_utf8(main.bytes.clone())
+            .expect("rewritten module should be UTF-8")
+            .contains(
+                Path::new(&dependency.output_path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .expect("dependency filename should be UTF-8")
+            )
+    );
+
+    let mut changed_sources = sources;
+    changed_sources.insert(
+        "assets/scripts/dependency.js",
+        "export const value = 2;\n".to_owned(),
+    );
+    let second = build_script_assets_from_sources(&changed_sources)
+        .expect("changed script graph should build successfully");
+
+    assert_ne!(
+        first["assets/scripts/dependency.js"].output_path,
+        second["assets/scripts/dependency.js"].output_path
+    );
+    assert_ne!(
+        first["assets/scripts/main.js"].output_path,
+        second["assets/scripts/main.js"].output_path
+    );
+    assert_eq!(
+        first["assets/scripts/unrelated.js"].output_path,
+        second["assets/scripts/unrelated.js"].output_path
+    );
+}
+
+#[test]
+fn rejects_invalid_javascript_dependency_graphs() {
+    let missing = BTreeMap::from([(
+        "assets/scripts/main.js",
+        "import \"./missing.js\";\n".to_owned(),
+    )]);
+    let error = build_script_assets_from_sources(&missing)
+        .expect_err("missing local dependency should fail");
+    assert!(error.to_string().contains("missing local module"));
+
+    let cycle = BTreeMap::from([
+        (
+            "assets/scripts/first.js",
+            "import \"./second.js\";\n".to_owned(),
+        ),
+        (
+            "assets/scripts/second.js",
+            "import \"./first.js\";\n".to_owned(),
+        ),
+    ]);
+    let error = build_script_assets_from_sources(&cycle).expect_err("dependency cycle should fail");
+    assert!(error.to_string().contains("contains a cycle"));
+}
+
+#[test]
 fn refuses_to_replace_unmanaged_output() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let output_directory = temporary_root.path().join("application");
@@ -111,6 +212,30 @@ fn refuses_to_replace_unmanaged_output() {
             .expect("unmanaged file should remain"),
         "keep"
     );
+}
+
+#[test]
+fn incomplete_publication_leaves_precreated_empty_output_reusable() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let output_directory = temporary_root.path().join("application");
+    fs::create_dir(&output_directory).expect("empty output should be created");
+    let (output_directory, staging) = create_staging_directory(&output_directory, OutputKind::App)
+        .expect("staging directory should be created");
+    let files = GeneratedFiles::default();
+
+    let error = publish_application_directory(&staging, &output_directory, &files)
+        .expect_err("application without index should be rejected");
+
+    assert!(error.to_string().contains("does not contain index.html"));
+    assert!(
+        fs::read_dir(&output_directory)
+            .expect("empty output should be readable")
+            .next()
+            .is_none()
+    );
+    generate_application(&output_directory, "../weather-data")
+        .expect("empty output should remain reusable");
+    assert!(output_directory.join("index.html").is_file());
 }
 
 #[test]
@@ -158,18 +283,93 @@ fn replaces_existing_generated_data_output() {
 }
 
 #[test]
-fn replaces_existing_generated_app_output() {
+fn accumulates_existing_generated_app_output() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let output_directory = temporary_root.path().join("application");
+    generate_application(&output_directory, "../weather-data-one")
+        .expect("initial app should generate");
+    let initial_paths = output_paths(&output_directory);
+    let immutable_path = initial_paths
+        .iter()
+        .find(|path| path.as_str() != "index.html")
+        .expect("immutable asset should exist")
+        .clone();
+    fs::write(output_directory.join("stale.js"), "stale").expect("stale file should be created");
+
+    #[cfg(unix)]
+    let immutable_inode = {
+        use std::os::unix::fs::MetadataExt;
+
+        fs::metadata(output_directory.join(&immutable_path))
+            .expect("immutable asset metadata should read")
+            .ino()
+    };
+
+    generate_application(&output_directory, "../weather-data-two")
+        .expect("generated app should be replaced");
+
+    assert!(output_directory.join("stale.js").is_file());
+    for path in initial_paths {
+        assert!(
+            output_directory.join(&path).is_file(),
+            "previous output should remain: {path}"
+        );
+    }
+    let index =
+        fs::read_to_string(output_directory.join("index.html")).expect("index should be readable");
+    assert!(index.contains("data-weather-data-url=\"../weather-data-two/\""));
+    assert!(!index.contains("data-weather-data-url=\"../weather-data-one/\""));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        assert_eq!(
+            fs::metadata(output_directory.join(&immutable_path))
+                .expect("immutable asset metadata should read")
+                .ino(),
+            immutable_inode,
+            "unchanged immutable asset should not be rewritten"
+        );
+    }
+}
+
+#[test]
+fn conflicting_immutable_asset_does_not_replace_application_index() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let output_directory = temporary_root.path().join("application");
     generate_application(&output_directory, "../weather-data")
         .expect("initial app should generate");
-    fs::write(output_directory.join("stale.js"), "stale").expect("stale file should be created");
+    let original_index =
+        fs::read(output_directory.join("index.html")).expect("index should be readable");
+    let conflicting_path = output_paths(&output_directory)
+        .into_iter()
+        .find(|path| path != "index.html")
+        .expect("immutable asset should exist");
+    let (output_directory, staging) = create_staging_directory(&output_directory, OutputKind::App)
+        .expect("staging directory should be created");
+    let mut replacement = GeneratedFiles::default();
+    replacement
+        .insert(&conflicting_path, "conflicting bytes")
+        .expect("conflicting asset should be generated");
+    replacement
+        .insert(
+            "index.html",
+            r#"<meta name="generator" content="cielo"><p>replacement</p>"#,
+        )
+        .expect("replacement index should be generated");
+    replacement
+        .write_to(staging.path())
+        .expect("replacement should be staged");
 
-    generate_application(&output_directory, "../weather-data")
-        .expect("generated app should be replaced");
+    let error = publish_application_directory(&staging, &output_directory, &replacement)
+        .expect_err("immutable conflict should fail");
 
-    assert!(!output_directory.join("stale.js").exists());
-    assert!(output_directory.join("index.html").is_file());
+    assert!(error.to_string().contains("conflicting content"));
+    assert_eq!(
+        fs::read(output_directory.join("index.html")).expect("index should remain readable"),
+        original_index
+    );
 }
 
 #[test]
@@ -230,27 +430,39 @@ fn generates_exact_readable_app_output() {
 
     let paths = output_paths(&output_directory);
     assert_eq!(paths.len(), summary.files);
-    for expected in [
-        "index.html",
-        "manifest.webmanifest",
-        "favicon.svg",
-        "assets/styles/design-tokens.css",
-        "assets/styles/foundation.css",
-        "assets/styles/locations.css",
-        "assets/styles/forecast.css",
-        "assets/styles/interactions.css",
-        "assets/scripts/main.js",
-        "assets/scripts/application-controller.js",
-        "assets/scripts/locations-controller.js",
-        "assets/scripts/forecast-controller.js",
-        "assets/scripts/municipality-row-gesture-controller.js",
-        "assets/scripts/municipality-catalog.js",
-        "assets/scripts/weather-data-client.js",
-        "assets/scripts/forecast-store.js",
-        "assets/scripts/preferences-store.js",
-        "assets/scripts/dom.js",
+    assert!(paths.contains(&"index.html".to_owned()));
+    for (directory, stem, extension) in [
+        ("", "manifest", "webmanifest"),
+        ("", "favicon", "svg"),
+        ("assets/licenses", "lucide", "txt"),
+        ("assets/styles", "design-tokens", "css"),
+        ("assets/styles", "foundation", "css"),
+        ("assets/styles", "locations", "css"),
+        ("assets/styles", "forecast", "css"),
+        ("assets/styles", "interactions", "css"),
+        ("assets/scripts", "main", "js"),
+        ("assets/scripts", "application-controller", "js"),
+        ("assets/scripts", "locations-controller", "js"),
+        ("assets/scripts", "forecast-controller", "js"),
+        (
+            "assets/scripts",
+            "municipality-row-gesture-controller",
+            "js",
+        ),
+        ("assets/scripts", "municipality-catalog", "js"),
+        ("assets/scripts", "weather-data-client", "js"),
+        ("assets/scripts", "forecast-store", "js"),
+        ("assets/scripts", "preferences-store", "js"),
+        ("assets/scripts", "dom", "js"),
+        ("assets/icons", "apple-touch-icon", "png"),
+        ("assets/icons", "application-192", "png"),
+        ("assets/icons", "application-512", "png"),
+        ("assets/icons", "application-maskable-512", "png"),
     ] {
-        assert!(paths.contains(&expected.to_owned()), "missing {expected}");
+        find_hashed_path(&paths, directory, stem, extension);
+    }
+    for path in paths.iter().filter(|path| path.as_str() != "index.html") {
+        assert_content_hash(&output_directory, path);
     }
     assert!(!paths.contains(&"service-worker.js".to_owned()));
     assert!(paths.iter().all(|path| !path.starts_with('.')));
@@ -258,7 +470,7 @@ fn generates_exact_readable_app_output() {
     assert!(
         paths
             .iter()
-            .all(|path| !has_extension(path, "svg") || path == "favicon.svg")
+            .all(|path| !has_extension(path, "svg") || path.starts_with("favicon."))
     );
     assert!(summary.bytes <= 185_000);
 
@@ -277,29 +489,42 @@ fn generates_exact_readable_app_output() {
     assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
     assert!(!index.contains("back-swipe-region"));
 
-    for stylesheet in [
-        "design-tokens.css",
-        "foundation.css",
-        "locations.css",
-        "forecast.css",
-        "interactions.css",
-    ] {
-        let css = fs::read_to_string(output_directory.join("assets/styles").join(stylesheet))
-            .expect("stylesheet should be readable");
+    for path in paths.iter().filter(|path| has_extension(path, "css")) {
+        assert!(index.contains(&format!("./{path}")));
+        let css =
+            fs::read_to_string(output_directory.join(path)).expect("stylesheet should be readable");
         StyleSheet::parse(&css, ParserOptions::default())
-            .unwrap_or_else(|error| panic!("invalid CSS in {stylesheet}: {error:?}"));
+            .unwrap_or_else(|error| panic!("invalid CSS in {path}: {error:?}"));
     }
 
     let mut javascript_bytes = 0;
     for path in paths.iter().filter(|path| has_extension(path, "js")) {
         let script =
             fs::read_to_string(output_directory.join(path)).expect("script should be readable");
+        for specifier in local_javascript_specifiers(&script) {
+            let referenced_path = Path::new(path)
+                .parent()
+                .expect("script should have a parent")
+                .join(
+                    specifier
+                        .strip_prefix("./")
+                        .expect("local specifier should be relative"),
+                )
+                .to_string_lossy()
+                .replace('\\', "/");
+            assert!(
+                paths.contains(&referenced_path),
+                "{path} references missing {referenced_path}"
+            );
+        }
         assert!(!script.contains("innerHTML"));
         assert!(!script.contains("<style>"));
         assert!(!script.contains("customElements"));
         javascript_bytes += script.len();
     }
     assert!(javascript_bytes <= 95_000);
+
+    assert_application_manifest(&output_directory, &paths, &index);
 }
 
 #[test]
@@ -409,6 +634,114 @@ fn output_paths(root: &Path) -> Vec<String> {
     collect(root, root, &mut paths);
     paths.sort();
     paths
+}
+
+fn find_hashed_path<'a>(
+    paths: &'a [String],
+    directory: &str,
+    stem: &str,
+    extension: &str,
+) -> &'a str {
+    paths
+        .iter()
+        .find(|path| {
+            let path = Path::new(path);
+            let parent = path
+                .parent()
+                .and_then(Path::to_str)
+                .expect("generated path parent should be UTF-8");
+            let Some(hashed_stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                return false;
+            };
+            let Some(hash) = hashed_stem
+                .strip_prefix(stem)
+                .and_then(|value| value.strip_prefix('.'))
+            else {
+                return false;
+            };
+            parent == directory
+                && path
+                    .extension()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+                && hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .map_or_else(
+            || panic!("missing hashed asset {directory}/{stem}.*.{extension}"),
+            String::as_str,
+        )
+}
+
+fn assert_content_hash(root: &Path, relative_path: &str) {
+    let path = Path::new(relative_path);
+    let hash = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.rsplit_once('.'))
+        .map(|(_, hash)| hash)
+        .expect("hashed filename should contain its digest");
+    let bytes = fs::read(root.join(path)).expect("hashed asset should be readable");
+    let expected = content_hash(&bytes);
+    assert_eq!(hash, expected, "content hash mismatch for {relative_path}");
+}
+
+fn local_javascript_specifiers(source: &str) -> Vec<String> {
+    let mut specifiers = Vec::new();
+    for (quote_position, quote) in source.char_indices() {
+        if !matches!(quote, '"' | '\'') {
+            continue;
+        }
+        let remaining = &source[quote_position + quote.len_utf8()..];
+        if !remaining.starts_with("./") {
+            continue;
+        }
+        let Some(value_end) = remaining.find(quote) else {
+            continue;
+        };
+        let specifier = &remaining[..value_end];
+        if Path::new(specifier)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("js"))
+        {
+            specifiers.push(specifier.to_owned());
+        }
+    }
+    specifiers
+}
+
+fn assert_application_manifest(root: &Path, paths: &[String], index: &str) {
+    let manifest_path = find_hashed_path(paths, "", "manifest", "webmanifest");
+    assert!(index.contains(&format!("./{manifest_path}")));
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join(manifest_path)).expect("manifest should be readable"),
+    )
+    .expect("manifest should decode");
+    assert_eq!(manifest["id"], "./");
+    assert_eq!(manifest["start_url"], "./");
+    for icon in manifest["icons"]
+        .as_array()
+        .expect("manifest icons should be an array")
+    {
+        let path = icon["src"]
+            .as_str()
+            .and_then(|value| value.strip_prefix("./"))
+            .expect("manifest icon should use a relative URL");
+        assert!(
+            paths.contains(&path.to_owned()),
+            "missing manifest icon {path}"
+        );
+    }
+
+    for path in [
+        find_hashed_path(paths, "", "favicon", "svg"),
+        find_hashed_path(paths, "assets/icons", "apple-touch-icon", "png"),
+        find_hashed_path(paths, "assets/scripts", "main", "js"),
+        find_hashed_path(paths, "assets/licenses", "lucide", "txt"),
+    ] {
+        assert!(index.contains(&format!("./{path}")));
+    }
 }
 
 fn has_extension(path: &str, extension: &str) -> bool {
