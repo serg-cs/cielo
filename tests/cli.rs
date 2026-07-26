@@ -41,7 +41,7 @@ fn build_data_requires_api_key_environment_variable() {
 }
 
 #[test]
-fn help_describes_only_the_build_command() {
+fn help_describes_build_and_deploy_commands() {
     let mut command = cargo_bin_cmd!("cielo");
 
     command
@@ -49,11 +49,21 @@ fn help_describes_only_the_build_command() {
         .assert()
         .success()
         .stdout(predicate::str::contains("build"))
+        .stdout(predicate::str::contains("deploy"))
         .stdout(predicate::str::contains("generate").not());
 
     let mut build_command = cargo_bin_cmd!("cielo");
     build_command
         .arg("build")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("app"))
+        .stdout(predicate::str::contains("data"));
+
+    let mut deploy_command = cargo_bin_cmd!("cielo");
+    deploy_command
+        .arg("deploy")
         .arg("--help")
         .assert()
         .success()

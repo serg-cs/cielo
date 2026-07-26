@@ -6,11 +6,16 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     aemet::AemetClient,
-    cli::{BuildDataArgs, BuildTarget, Cli, Command},
+    cli::{
+        BuildArgs, BuildDataArgs, BuildTarget, Cli, Command, DeployArgs, DeployTarget,
+        DeployTargetArgs,
+    },
+    deployment::DeploymentKind,
 };
 
 mod aemet;
 pub mod cli;
+mod deployment;
 mod generation;
 
 const API_KEY_ENV: &str = "AEMET_API_KEY";
@@ -31,7 +36,15 @@ pub fn init_tracing() {
 /// Returns an error when configuration, collection, validation, or publishing
 /// fails.
 pub async fn run(cli: Cli) -> Result<()> {
-    let Command::Build(args) = cli.command;
+    match cli.command {
+        Command::Build(args) => build(args).await?,
+        Command::Deploy(args) => deploy(args).await?,
+    }
+
+    Ok(())
+}
+
+async fn build(args: BuildArgs) -> Result<()> {
     match args.target {
         BuildTarget::App(args) => {
             let summary = generation::generate_application(&args.output, &args.data)?;
@@ -67,6 +80,29 @@ async fn build_data(args: &BuildDataArgs) -> Result<()> {
         bytes = summary.bytes,
         output = %args.output.display(),
         "weather data generated"
+    );
+
+    Ok(())
+}
+
+async fn deploy(args: DeployArgs) -> Result<()> {
+    match args.target {
+        DeployTarget::App(args) => deploy_target(&args, DeploymentKind::App).await?,
+        DeployTarget::Data(args) => deploy_target(&args, DeploymentKind::Data).await?,
+    }
+
+    Ok(())
+}
+
+async fn deploy_target(args: &DeployTargetArgs, kind: DeploymentKind) -> Result<()> {
+    // Upload one validated directory without exposing credentials in arguments or logs.
+    let summary = deployment::deploy_directory(args, kind).await?;
+    info!(
+        target = kind.as_str(),
+        bucket = args.bucket,
+        files = summary.files,
+        bytes = summary.bytes,
+        "files deployed"
     );
 
     Ok(())
