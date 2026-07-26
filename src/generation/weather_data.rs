@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::{BufWriter, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
@@ -18,13 +18,14 @@ use super::publisher::{OutputKind, create_staging_directory, publish_staging_dir
 
 const AEMET_SOURCE_NAME: &str = "AEMET";
 const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
+const FORECAST_BUNDLE_RANGE_SIZE: u16 = 20;
 const HOURLY_FORECASTS_DIRECTORY: &str = "hourly_forecasts";
 const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
 
 #[derive(Debug)]
 pub(crate) struct WeatherDataGenerationSummary {
     pub(crate) municipalities: usize,
-    pub(crate) forecast_files: usize,
+    pub(crate) forecast_bundle_files: usize,
     pub(crate) files: usize,
     pub(crate) bytes: usize,
 }
@@ -54,11 +55,16 @@ pub(super) struct MunicipalityRecord {
 
 #[derive(Debug, Serialize)]
 struct MunicipalityForecastDocument<'a> {
-    generator: &'a str,
     source: Source<'a>,
     municipality_id: &'a str,
     time_zone: TimeZone,
     hourly_forecasts: &'a [HourlyForecast],
+}
+
+#[derive(Debug, Serialize)]
+struct ForecastBundleDocument<'a> {
+    generator: &'a str,
+    municipalities: BTreeMap<&'a str, MunicipalityForecastDocument<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -87,10 +93,11 @@ pub(crate) async fn generate_weather_data(
 
     // Write a complete sibling output before replacing the published directory.
     let mut statistics = WeatherDataStatistics::default();
-    write_weather_data_files(staging.path(), &snapshot, &mut statistics)?;
+    let forecast_bundle_files =
+        write_weather_data_files(staging.path(), &snapshot, &mut statistics)?;
     let summary = WeatherDataGenerationSummary {
         municipalities: snapshot.municipalities.len(),
-        forecast_files: snapshot.forecasts.len(),
+        forecast_bundle_files,
         files: statistics.file_count,
         bytes: statistics.total_bytes,
     };
@@ -159,7 +166,7 @@ pub(super) fn write_weather_data_files(
     output_directory: &Path,
     snapshot: &WeatherDataSnapshot,
     statistics: &mut WeatherDataStatistics,
-) -> Result<()> {
+) -> Result<usize> {
     let latest_generation_time = snapshot
         .forecasts
         .iter()
@@ -187,9 +194,10 @@ pub(super) fn write_weather_data_files(
         statistics,
     )?;
 
+    // Group stable numeric ID ranges before serializing each bundle once.
+    let mut bundles = BTreeMap::<PathBuf, BTreeMap<&str, MunicipalityForecastDocument>>::new();
     for forecast in &snapshot.forecasts {
         let document = MunicipalityForecastDocument {
-            generator: GENERATOR_IDENTITY,
             source: Source {
                 name: AEMET_SOURCE_NAME,
                 url: AEMET_SOURCE_URL,
@@ -199,14 +207,34 @@ pub(super) fn write_weather_data_files(
             time_zone: time_zone_for(&forecast.id),
             hourly_forecasts: &forecast.hourly_forecasts,
         };
-        write_json(
-            output_directory,
-            &Path::new(HOURLY_FORECASTS_DIRECTORY).join(format!("{}.json", forecast.id)),
-            &document,
-            statistics,
-        )?;
+        bundles
+            .entry(forecast_bundle_path(&forecast.id)?)
+            .or_default()
+            .insert(&forecast.id, document);
     }
-    Ok(())
+
+    let forecast_bundle_files = bundles.len();
+    for (relative_path, municipalities) in bundles {
+        let document = ForecastBundleDocument {
+            generator: GENERATOR_IDENTITY,
+            municipalities,
+        };
+        write_json(output_directory, &relative_path, &document, statistics)?;
+    }
+    Ok(forecast_bundle_files)
+}
+
+fn forecast_bundle_path(municipality_id: &str) -> Result<PathBuf> {
+    validate_municipality_id(municipality_id)?;
+    let province = &municipality_id[..2];
+    let municipality_number = municipality_id[2..]
+        .parse::<u16>()
+        .with_context(|| format!("invalid municipality ID: {municipality_id}"))?;
+    let range_start = municipality_number / FORECAST_BUNDLE_RANGE_SIZE * FORECAST_BUNDLE_RANGE_SIZE;
+
+    Ok(Path::new(HOURLY_FORECASTS_DIRECTORY)
+        .join(province)
+        .join(format!("{range_start:03}.json")))
 }
 
 fn write_json(
@@ -224,6 +252,12 @@ fn write_json(
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    // Materialize nested province directories only when their bundles are present.
+    let parent = path
+        .parent()
+        .context("generated weather-data file does not have a parent directory")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create generated directory {}", parent.display()))?;
     let file = File::create(path)
         .with_context(|| format!("failed to create generated file {}", path.display()))?;
     let mut writer = BufWriter::new(file);

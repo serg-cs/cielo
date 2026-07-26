@@ -9,6 +9,12 @@ const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
 const temperatureMinimum = -32_768;
 const temperatureMaximum = 32_767;
+const forecastBundleRangeSize = 20;
+const supportedTimeZones = new Set([
+  "Africa/Ceuta",
+  "Atlantic/Canary",
+  "Europe/Madrid",
+]);
 const supportedConditions = new Set([
   "cloud",
   "cloud-drizzle",
@@ -43,6 +49,8 @@ const supportedConditions = new Set([
  * @property {Map<string, CurrentConditions>} forecastsByHour
  */
 
+/** @typedef {Map<string, ForecastTimeline>} ForecastBundle */
+
 /**
  * @typedef {object} HourlyForecastPeriod
  * @property {number} hour
@@ -57,19 +65,53 @@ const supportedConditions = new Set([
 
 /**
  * @param {unknown} document
- * @param {Municipality} municipality
- * @returns {ForecastTimeline}
+ * @returns {ForecastBundle}
  */
-export function validateForecastDocument(document, municipality) {
+export function validateForecastBundle(document) {
   if (
     typeof document !== "object" ||
     document === null ||
     !("generator" in document) ||
     document.generator !== generatorIdentity ||
+    !("municipalities" in document) ||
+    typeof document.municipalities !== "object" ||
+    document.municipalities === null ||
+    Array.isArray(document.municipalities)
+  ) {
+    throw new Error("El documento de previsiones no es válido");
+  }
+
+  // Validate every keyed member before exposing any forecast from the bundle.
+  const forecasts = new Map();
+  for (const [municipalityId, forecastDocument] of Object.entries(
+    document.municipalities,
+  )) {
+    const forecast = validateForecastDocument(
+      forecastDocument,
+      municipalityId,
+    );
+    forecasts.set(municipalityId, forecast);
+  }
+  if (forecasts.size === 0) {
+    throw new Error("El documento de previsiones no es válido");
+  }
+  return forecasts;
+}
+
+/**
+ * @param {unknown} document
+ * @param {string} municipalityId
+ * @returns {ForecastTimeline}
+ */
+function validateForecastDocument(document, municipalityId) {
+  if (
+    typeof document !== "object" ||
+    document === null ||
     !("municipality_id" in document) ||
-    document.municipality_id !== municipality.id ||
+    document.municipality_id !== municipalityId ||
     !("time_zone" in document) ||
-    document.time_zone !== municipality.timeZone ||
+    typeof document.time_zone !== "string" ||
+    !supportedTimeZones.has(document.time_zone) ||
     !("hourly_forecasts" in document) ||
     !Array.isArray(document.hourly_forecasts) ||
     document.hourly_forecasts.length === 0
@@ -96,10 +138,24 @@ export function validateForecastDocument(document, municipality) {
   }
 
   return {
-    municipalityId: municipality.id,
-    timeZone: municipality.timeZone,
+    municipalityId,
+    timeZone: document.time_zone,
     forecastsByHour,
   };
+}
+
+/**
+ * Select only a catalog-compatible member without coupling unrelated entries.
+ *
+ * @param {ForecastBundle} bundle
+ * @param {Municipality} municipality
+ * @returns {ForecastTimeline | null}
+ */
+function forecastForMunicipality(bundle, municipality) {
+  const forecast = bundle.get(municipality.id);
+  return forecast !== undefined && forecast.timeZone === municipality.timeZone
+    ? forecast
+    : null;
 }
 
 /**
@@ -147,6 +203,7 @@ export class ForecastStore extends EventTarget {
   #forecasts = new Map();
   #currentConditionsById = new Map();
   #forecastStatuses = new Map();
+  #cacheReads = new Map();
   #inFlight = new Map();
   #weatherDataUrl;
   #fetcher;
@@ -292,10 +349,10 @@ export class ForecastStore extends EventTarget {
     }
 
     if (!this.#forecasts.has(municipalityId)) {
-      const forecast = await readValidatedJson(
-        forecastUrl(this.#weatherDataUrl, municipality.id),
-        (document) => validateForecastDocument(document, municipality),
-      );
+      const bundle = await this.#readForecastBundle(municipality.id);
+      const forecast = bundle === null
+        ? null
+        : forecastForMunicipality(bundle, municipality);
       if (
         forecast !== null &&
         this.#savedMunicipalityIds.has(municipalityId) &&
@@ -325,12 +382,6 @@ export class ForecastStore extends EventTarget {
 
   /** @param {string} municipalityId */
   async #refreshMunicipality(municipalityId) {
-    const existingRequest = this.#inFlight.get(municipalityId);
-    if (existingRequest !== undefined) {
-      await existingRequest;
-      return;
-    }
-
     const municipality = this.#catalogById.get(municipalityId);
     if (
       municipality === undefined ||
@@ -348,40 +399,89 @@ export class ForecastStore extends EventTarget {
       this.#publishForecastStatus(municipalityId, "loading");
     }
 
-    const request = this.#loadForecast(municipality)
-      .catch((error) => {
-        if (!this.#hasUsableForecast(municipalityId)) {
-          this.#publishForecastStatus(
-            municipalityId,
-            navigator.onLine ? "error" : "offline",
-          );
-        }
-        console.error(
-          `No se pudo actualizar la previsión de ${municipality.name}`,
-          error,
+    try {
+      await this.#loadForecast(municipality);
+    } catch (error) {
+      if (!this.#hasUsableForecast(municipalityId)) {
+        this.#publishForecastStatus(
+          municipalityId,
+          navigator.onLine ? "error" : "offline",
         );
-      })
-      .finally(() => {
-        this.#inFlight.delete(municipalityId);
-      });
-    this.#inFlight.set(municipalityId, request);
-    await request;
+      }
+      console.error(
+        `No se pudo actualizar la previsión de ${municipality.name}`,
+        error,
+      );
+    }
   }
 
   /** @param {Municipality} municipality */
   async #loadForecast(municipality) {
-    const forecast = await fetchValidatedJson(
-      forecastUrl(this.#weatherDataUrl, municipality.id),
-      (document) => validateForecastDocument(document, municipality),
-      this.#fetcher,
-    );
+    const bundle = await this.#fetchForecastBundle(municipality.id);
     if (!this.#savedMunicipalityIds.has(municipality.id)) {
       return;
     }
 
+    const forecast = forecastForMunicipality(bundle, municipality);
+    if (forecast === null) {
+      throw new Error("El lote no contiene la previsión solicitada");
+    }
     if (!this.#storeForecast(municipality.id, forecast)) {
       throw new Error("La previsión no contiene horas vigentes");
     }
+  }
+
+  /**
+   * Share one Cache Storage read between municipalities in the same bundle.
+   *
+   * @param {string} municipalityId
+   * @returns {Promise<ForecastBundle | null>}
+   */
+  async #readForecastBundle(municipalityId) {
+    const url = forecastBundleUrl(this.#weatherDataUrl, municipalityId);
+    const key = url.href;
+    const existingRequest = this.#cacheReads.get(key);
+    if (existingRequest !== undefined) {
+      return existingRequest;
+    }
+
+    const request = readValidatedJson(
+      url,
+      validateForecastBundle,
+    ).finally(() => {
+      if (this.#cacheReads.get(key) === request) {
+        this.#cacheReads.delete(key);
+      }
+    });
+    this.#cacheReads.set(key, request);
+    return request;
+  }
+
+  /**
+   * Share one network refresh between municipalities in the same bundle.
+   *
+   * @param {string} municipalityId
+   * @returns {Promise<ForecastBundle>}
+   */
+  async #fetchForecastBundle(municipalityId) {
+    const url = forecastBundleUrl(this.#weatherDataUrl, municipalityId);
+    const key = url.href;
+    const existingRequest = this.#inFlight.get(key);
+    if (existingRequest !== undefined) {
+      return existingRequest;
+    }
+
+    const request = fetchValidatedJson(
+      url,
+      validateForecastBundle,
+      this.#fetcher,
+    ).finally(() => {
+      if (this.#inFlight.get(key) === request) {
+        this.#inFlight.delete(key);
+      }
+    });
+    this.#inFlight.set(key, request);
+    return request;
   }
 
   /**
@@ -585,9 +685,18 @@ export class ForecastStore extends EventTarget {
 }
 
 /** @param {URL} weatherDataUrl @param {string} municipalityId */
-function forecastUrl(weatherDataUrl, municipalityId) {
+export function forecastBundleUrl(weatherDataUrl, municipalityId) {
+  if (!/^\d{5}$/u.test(municipalityId)) {
+    throw new Error("El identificador del municipio no es válido");
+  }
+
+  const province = municipalityId.slice(0, 2);
+  const municipalityNumber = Number(municipalityId.slice(2));
+  const rangeStart =
+    Math.floor(municipalityNumber / forecastBundleRangeSize) *
+    forecastBundleRangeSize;
   return new URL(
-    `hourly_forecasts/${encodeURIComponent(municipalityId)}.json`,
+    `hourly_forecasts/${province}/${String(rangeStart).padStart(3, "0")}.json`,
     weatherDataUrl,
   );
 }

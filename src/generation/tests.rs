@@ -573,33 +573,84 @@ fn writes_readable_weather_data_files() {
     let snapshot = build_snapshot(sample_source_data()).expect("snapshot should build");
     let mut statistics = WeatherDataStatistics::default();
 
-    write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
+    let bundle_files = write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
         .expect("weather-data files should write");
 
     assert_eq!(
         output_paths(temporary_root.path()),
-        ["hourly_forecasts/35001.json", "municipalities.json"]
+        ["hourly_forecasts/35/000.json", "municipalities.json"]
     );
+    assert_eq!(bundle_files, 1);
     let catalog: serde_json::Value = serde_json::from_slice(
         &fs::read(temporary_root.path().join("municipalities.json"))
             .expect("catalog should be readable"),
     )
     .expect("catalog should decode");
-    let forecast: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("hourly_forecasts/35001.json"))
-            .expect("forecast should be readable"),
+    let bundle: serde_json::Value = serde_json::from_slice(
+        &fs::read(temporary_root.path().join("hourly_forecasts/35/000.json"))
+            .expect("forecast bundle should be readable"),
     )
-    .expect("forecast should decode");
+    .expect("forecast bundle should decode");
+    let forecast = &bundle["municipalities"]["35001"];
 
     assert_eq!(catalog["generator"], "cielo");
     assert!(catalog.get("schema_version").is_none());
     assert_eq!(catalog["source"]["generated_at"], "2026-07-25T08:00:00");
     assert_eq!(catalog["municipalities"][0]["time_zone"], "Atlantic/Canary");
-    assert_eq!(forecast["generator"], "cielo");
-    assert!(forecast.get("schema_version").is_none());
+    assert_eq!(bundle["generator"], "cielo");
+    assert!(bundle.get("forecasts").is_none());
     assert_eq!(forecast["municipality_id"], "35001");
     assert_eq!(forecast["hourly_forecasts"][0]["temperature_celsius"], 24);
     assert!(forecast.get("temperatures").is_none());
+}
+
+#[test]
+fn groups_forecasts_into_stable_twenty_id_ranges() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let mut source_data = sample_source_data();
+    source_data.municipalities.clear();
+    source_data.forecasts.clear();
+    for id in ["35000", "35019", "35020", "36000"] {
+        source_data
+            .municipalities
+            .insert(id.to_owned(), format!("Municipality {id}"));
+        source_data.forecasts.push(sample_forecast(id));
+    }
+    let snapshot = build_snapshot(source_data).expect("snapshot should build");
+    let mut statistics = WeatherDataStatistics::default();
+
+    let bundle_files = write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
+        .expect("weather-data files should write");
+
+    assert_eq!(bundle_files, 3);
+    assert_eq!(
+        output_paths(temporary_root.path()),
+        [
+            "hourly_forecasts/35/000.json",
+            "hourly_forecasts/35/020.json",
+            "hourly_forecasts/36/000.json",
+            "municipalities.json",
+        ]
+    );
+    let first_bundle: serde_json::Value = serde_json::from_slice(
+        &fs::read(temporary_root.path().join("hourly_forecasts/35/000.json"))
+            .expect("first bundle should be readable"),
+    )
+    .expect("first bundle should decode");
+    let municipalities = first_bundle["municipalities"]
+        .as_object()
+        .expect("bundle municipalities should be an object");
+    assert_eq!(
+        municipalities
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["35000", "35019"]
+    );
+    assert_eq!(
+        municipalities["35019"]["municipality_id"],
+        serde_json::Value::String("35019".to_owned())
+    );
 }
 
 #[test]
@@ -900,18 +951,22 @@ fn attribute_value(attributes: &[html5ever::Attribute], name: &str) -> Option<St
 fn sample_source_data() -> AemetWeatherData {
     AemetWeatherData {
         municipalities: HashMap::from([("35001".to_owned(), "Arco, El".to_owned())]),
-        forecasts: vec![MunicipalityForecast {
-            id: "35001".to_owned(),
-            name: "Forecast fallback".to_owned(),
-            province: "Las Palmas (Gran Canaria)".to_owned(),
-            generated_at: "2026-07-25T08:00:00".to_owned(),
-            hourly_forecasts: vec![HourlyForecast {
-                date: "2026-07-25".to_owned(),
-                hour: 10,
-                temperature_celsius: 24,
-                condition: WeatherCondition::CloudSun,
-                description: "Intervalos nubosos".to_owned(),
-            }],
+        forecasts: vec![sample_forecast("35001")],
+    }
+}
+
+fn sample_forecast(id: &str) -> MunicipalityForecast {
+    MunicipalityForecast {
+        id: id.to_owned(),
+        name: "Forecast fallback".to_owned(),
+        province: "Las Palmas (Gran Canaria)".to_owned(),
+        generated_at: "2026-07-25T08:00:00".to_owned(),
+        hourly_forecasts: vec![HourlyForecast {
+            date: "2026-07-25".to_owned(),
+            hour: 10,
+            temperature_celsius: 24,
+            condition: WeatherCondition::CloudSun,
+            description: "Intervalos nubosos".to_owned(),
         }],
     }
 }

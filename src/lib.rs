@@ -62,7 +62,7 @@ async fn build_data(args: &BuildDataArgs) -> Result<()> {
     let summary = generation::generate_weather_data(&client, &args.output).await?;
     info!(
         municipalities = summary.municipalities,
-        forecast_files = summary.forecast_files,
+        forecast_bundle_files = summary.forecast_bundle_files,
         files = summary.files,
         bytes = summary.bytes,
         output = %args.output.display(),
