@@ -3,6 +3,10 @@ import {
   setDynamicIcon,
 } from "./dom.js";
 
+const backSwipeEdgeWidth = 32;
+const backSwipeMinimumDistance = 64;
+const backSwipeDirectionRatio = 1.25;
+
 export class ForecastController {
   #elements;
   #onCloseRequest;
@@ -14,6 +18,11 @@ export class ForecastController {
   #hourlyItems = [];
   #resetHourlyScrollOnRender = false;
   #hourlyScrollResetFrame = null;
+  #backSwipe = {
+    touchId: null,
+    startX: 0,
+    startY: 0,
+  };
 
   constructor(root, { onCloseRequest, onClose }) {
     this.#elements = captureForecastElements(root);
@@ -113,6 +122,28 @@ export class ForecastController {
     this.#elements.locationsButton.addEventListener("click", () => {
       this.#requestClose();
     });
+
+    // Capture edge touches before Safari starts native history navigation.
+    this.#elements.screen.addEventListener(
+      "touchstart",
+      this.#handleBackSwipeStart,
+      { passive: false },
+    );
+    this.#elements.screen.addEventListener(
+      "touchmove",
+      this.#handleBackSwipeMove,
+      { passive: false },
+    );
+    this.#elements.screen.addEventListener(
+      "touchend",
+      this.#handleBackSwipeEnd,
+      { passive: false },
+    );
+    this.#elements.screen.addEventListener(
+      "touchcancel",
+      this.#handleBackSwipeCancel,
+      { passive: false },
+    );
   }
 
   #installDocumentKeys() {
@@ -126,6 +157,77 @@ export class ForecastController {
       this.#requestClose();
     }
   };
+
+  #handleBackSwipeStart = (event) => {
+    if (
+      this.#municipality === null ||
+      event.touches.length !== 1 ||
+      !(event.target instanceof Element) ||
+      event.target.closest(
+        "button, a[href], input, select, textarea, [contenteditable]",
+      ) !== null
+    ) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    if (touch === undefined || touch.clientX > backSwipeEdgeWidth) {
+      return;
+    }
+
+    this.#backSwipe.touchId = touch.identifier;
+    this.#backSwipe.startX = touch.clientX;
+    this.#backSwipe.startY = touch.clientY;
+    event.preventDefault();
+  };
+
+  #handleBackSwipeMove = (event) => {
+    if (this.#backSwipe.touchId === null) {
+      return;
+    }
+
+    event.preventDefault();
+  };
+
+  #handleBackSwipeEnd = (event) => {
+    const touch = this.#backSwipeTouch(event.changedTouches);
+    if (touch === null) {
+      return;
+    }
+
+    const horizontalDistance = touch.clientX - this.#backSwipe.startX;
+    const verticalDistance = Math.abs(touch.clientY - this.#backSwipe.startY);
+    this.#resetBackSwipe();
+    event.preventDefault();
+    if (
+      horizontalDistance >= backSwipeMinimumDistance &&
+      horizontalDistance >= verticalDistance * backSwipeDirectionRatio
+    ) {
+      this.#requestClose();
+    }
+  };
+
+  #handleBackSwipeCancel = (event) => {
+    if (this.#backSwipeTouch(event.changedTouches) === null) {
+      return;
+    }
+
+    this.#resetBackSwipe();
+  };
+
+  #backSwipeTouch(touches) {
+    if (this.#backSwipe.touchId === null) {
+      return null;
+    }
+
+    return Array.from(touches).find(
+      (touch) => touch.identifier === this.#backSwipe.touchId,
+    ) ?? null;
+  }
+
+  #resetBackSwipe() {
+    this.#backSwipe.touchId = null;
+  }
 
   #createHourlyItems() {
     this.#hourlyItems = Array.from({ length: 24 }, () => {

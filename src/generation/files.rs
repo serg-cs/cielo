@@ -30,10 +30,6 @@ impl GeneratedFiles {
         self.files.len()
     }
 
-    pub(super) fn total_bytes(&self) -> usize {
-        self.files.values().map(Vec::len).sum()
-    }
-
     pub(super) fn contains(&self, path: impl AsRef<Path>) -> bool {
         self.files.contains_key(path.as_ref())
     }

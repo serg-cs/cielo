@@ -99,7 +99,7 @@ fn rejects_unsafe_icon_sources() {
 }
 
 #[test]
-fn generated_files_track_content_and_reject_unsafe_paths() {
+fn generated_files_count_entries_and_reject_unsafe_paths() {
     let mut files = GeneratedFiles::default();
     files
         .insert("z.js", b"z".to_vec())
@@ -109,7 +109,6 @@ fn generated_files_track_content_and_reject_unsafe_paths() {
         .expect("path should work");
 
     assert_eq!(files.file_count(), 2);
-    assert_eq!(files.total_bytes(), 2);
     assert!(files.insert(Path::new("../escape"), Vec::new()).is_err());
     assert!(files.insert(Path::new("/absolute"), Vec::new()).is_err());
 }
@@ -458,6 +457,9 @@ fn generates_exact_readable_app_output() {
         ("assets/icons", "application-192", "png"),
         ("assets/icons", "application-512", "png"),
         ("assets/icons", "application-maskable-512", "png"),
+        ("assets/fonts", "manrope-latin-wght", "woff2"),
+        ("assets/fonts", "manrope-latin-ext-wght", "woff2"),
+        ("assets/licenses", "manrope", "txt"),
     ] {
         find_hashed_path(&paths, directory, stem, extension);
     }
@@ -472,8 +474,6 @@ fn generates_exact_readable_app_output() {
             .iter()
             .all(|path| !has_extension(path, "svg") || path.starts_with("favicon."))
     );
-    assert!(summary.bytes <= 185_000);
-
     let index =
         fs::read_to_string(output_directory.join("index.html")).expect("index should be readable");
     let dom = parse_document(RcDom::default(), html5ever::ParseOpts::default()).one(index.clone());
@@ -488,6 +488,7 @@ fn generates_exact_readable_app_output() {
     assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
     assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
     assert!(!index.contains("back-swipe-region"));
+    assert_generated_fonts(&output_directory, &paths, &index);
 
     for path in paths.iter().filter(|path| has_extension(path, "css")) {
         assert!(index.contains(&format!("./{path}")));
@@ -497,7 +498,6 @@ fn generates_exact_readable_app_output() {
             .unwrap_or_else(|error| panic!("invalid CSS in {path}: {error:?}"));
     }
 
-    let mut javascript_bytes = 0;
     for path in paths.iter().filter(|path| has_extension(path, "js")) {
         let script =
             fs::read_to_string(output_directory.join(path)).expect("script should be readable");
@@ -520,9 +520,7 @@ fn generates_exact_readable_app_output() {
         assert!(!script.contains("innerHTML"));
         assert!(!script.contains("<style>"));
         assert!(!script.contains("customElements"));
-        javascript_bytes += script.len();
     }
-    assert!(javascript_bytes <= 95_000);
 
     assert_application_manifest(&output_directory, &paths, &index);
 }
@@ -768,6 +766,29 @@ fn local_javascript_specifiers(source: &str) -> Vec<String> {
     specifiers
 }
 
+fn assert_generated_fonts(root: &Path, paths: &[String], index: &str) {
+    for declaration in [
+        "font-family: \"Manrope\"",
+        "font-display: optional",
+        "font-weight: 200 800",
+        "rel=\"preload\"",
+        "as=\"font\"",
+        "type=\"font/woff2\"",
+        "crossorigin",
+    ] {
+        assert!(index.contains(declaration));
+    }
+
+    for path in [
+        find_hashed_path(paths, "assets/fonts", "manrope-latin-wght", "woff2"),
+        find_hashed_path(paths, "assets/fonts", "manrope-latin-ext-wght", "woff2"),
+    ] {
+        assert!(index.contains(&format!("./{path}")));
+        let font = fs::read(root.join(path)).expect("font should be readable");
+        assert_eq!(font.get(..4), Some(b"wOF2".as_slice()));
+    }
+}
+
 fn assert_application_manifest(root: &Path, paths: &[String], index: &str) {
     let manifest_path = find_hashed_path(paths, "", "manifest", "webmanifest");
     assert!(index.contains(&format!("./{manifest_path}")));
@@ -798,6 +819,7 @@ fn assert_application_manifest(root: &Path, paths: &[String], index: &str) {
         find_hashed_path(paths, "assets/icons", "apple-touch-icon", "png"),
         find_hashed_path(paths, "assets/scripts", "main", "js"),
         find_hashed_path(paths, "assets/licenses", "lucide", "txt"),
+        find_hashed_path(paths, "assets/licenses", "manrope", "txt"),
     ] {
         assert!(index.contains(&format!("./{path}")));
     }

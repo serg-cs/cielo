@@ -83,6 +83,26 @@ fn assigns_immutable_caching_only_to_content_hashed_files() {
 }
 
 #[test]
+fn prepares_hashed_woff2_with_font_content_type_and_immutable_caching() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let input = temporary_root.path().join("application");
+    fs::create_dir_all(input.join("assets/fonts")).expect("font directory should be created");
+    fs::write(input.join("index.html"), "<html></html>").expect("index should be created");
+    let font_key = format!("assets/fonts/manrope.{}.woff2", "a".repeat(64));
+    fs::write(input.join(&font_key), "font").expect("font should be created");
+
+    let files =
+        prepare_deployment(&input, DeploymentKind::App).expect("app deployment should prepare");
+    let font = files
+        .iter()
+        .find(|file| file.key == font_key)
+        .expect("font should be prepared");
+
+    assert_eq!(font.content_type, "font/woff2");
+    assert_eq!(font.cache_control, Some(IMMUTABLE_CACHE_CONTROL));
+}
+
+#[test]
 fn rejects_empty_data_and_app_without_root_index() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let empty = temporary_root.path().join("empty");

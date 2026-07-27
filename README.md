@@ -9,22 +9,33 @@ periodically.
 
 ## Build
 
-Building generates a ready to serve static website.
+Run the build commands from the repository root. The data build fetches the
+latest forecast from AEMET, so the `AEMET_API_KEY` environment variable must be
+set first.
 
 ```sh
 cargo run -- build data --output dist/data
 ```
 
 ```sh
-cargo run -- build app --output dist/app --data dist/data
+cargo run -- build app --output dist/app --data ../data
 ```
 
-The generated directories contain static files and can be served by any static
-web server. For example:
+The `--output` option is a filesystem path, while `--data` is the URL that the
+browser uses to request the generated forecast data. In this layout, `app` and
+`data` are sibling directories, so the app uses the relative URL `../data`.
+
+Serve their common `dist` directory:
 
 ```sh
-python3 -m http.server --directory dist/app 8080
+python3 -m http.server --directory dist 8000
 ```
+
+Then open
+[localhost:8000/app](http://localhost:8000/app/)
+
+When the data is hosted separately, pass its public HTTP or HTTPS URL to
+`--data` instead.
 
 ## Deploy
 

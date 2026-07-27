@@ -51,6 +51,7 @@
 
   .locations-button {
     display: grid;
+    flex: 0 0 var(--cielo-touch-target);
     width: var(--cielo-touch-target);
     height: var(--cielo-touch-target);
     padding: 0;
@@ -59,8 +60,8 @@
   }
 
   .locations-button .cielo-icon {
-    width: 1.2rem;
-    height: 1.2rem;
+    width: 1.5rem;
+    height: 1.5rem;
   }
 
   .location-switcher {
@@ -71,10 +72,10 @@
     min-height: var(--cielo-touch-target);
     padding: 0.2rem 0.4rem;
     border-radius: 0.75rem;
-    font-size: clamp(1.25rem, 5vw, 1.55rem);
+    font-size: clamp(1.5rem, 6vw, 1.8rem);
     font-weight: 680;
     letter-spacing: -0.025em;
-    line-height: 1.1;
+    line-height: 1.2;
     text-align: left;
   }
 
@@ -102,13 +103,15 @@
   }
 
   .current-reading {
+    --current-reading-size: clamp(6rem, 30vw, 10rem);
+
     display: flex;
     align-items: center;
   }
 
   .current-condition-icon {
-    width: clamp(4.5rem, 18vw, 6.5rem);
-    height: clamp(4.5rem, 18vw, 6.5rem);
+    width: var(--current-reading-size);
+    height: var(--current-reading-size);
     margin-left: auto;
     margin-right: 0.9rem;
   }
@@ -116,7 +119,7 @@
   #current-temperature-value {
     flex: 0 0 auto;
     margin-left: 0.9rem;
-    font-size: clamp(6rem, 30vw, 10rem);
+    font-size: var(--current-reading-size);
     font-variant-numeric: tabular-nums;
     font-weight: 300;
     letter-spacing: -0.075em;
@@ -129,7 +132,7 @@
     max-width: min(18rem, 41.5vw, calc(100% - 1.8rem));
     margin: 0.65rem 0 0 0.9rem;
     color: var(--cielo-color-muted);
-    font-size: clamp(0.95rem, 3.5vw, 1.125rem);
+    font-size: clamp(1.05rem, 4vw, 1.2rem);
     font-weight: 350;
     letter-spacing: 0.005em;
     line-height: 1.35;
@@ -164,7 +167,6 @@
     outline-offset: -0.2rem;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
-    scroll-snap-type: x proximity;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -193,7 +195,6 @@
     min-width: 0;
     color: var(--cielo-color-text);
     place-items: center;
-    scroll-snap-align: start;
   }
 
   .hourly-hour {
@@ -237,6 +238,12 @@
     }
   }
 
+  @media (hover: none) and (pointer: coarse) {
+    .forecast-screen {
+      overscroll-behavior-x: none;
+    }
+  }
+
   /* Preserve the mobile reading order while fitting short landscape views. */
   @media (orientation: landscape) and (max-height: 34rem) {
     .forecast-screen {
@@ -258,17 +265,12 @@
       margin-top: 0;
     }
 
-    .current-condition-icon {
-      width: clamp(3.5rem, 18vh, 4.75rem);
-      height: clamp(3.5rem, 18vh, 4.75rem);
-    }
-
-    #current-temperature-value {
-      font-size: clamp(4.75rem, 26vh, 7rem);
+    .current-reading {
+      --current-reading-size: clamp(4.75rem, 26vh, 7rem);
     }
 
     .current-condition-description {
-      font-size: clamp(0.9rem, 3.8vh, 1.05rem);
+      font-size: clamp(1rem, 4.2vh, 1.15rem);
     }
 
     .current-conditions-message {

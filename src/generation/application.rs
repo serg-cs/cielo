@@ -85,13 +85,22 @@ const APPLICATION_ICON_ASSETS: [(&str, &str); 4] = [
         "assets/icons/application-maskable-512.png",
     ),
 ];
+const FONT_ASSETS: [(&str, &str); 2] = [
+    (
+        "fonts/manrope-latin-wght.woff2",
+        "assets/fonts/manrope-latin-wght.woff2",
+    ),
+    (
+        "fonts/manrope-latin-ext-wght.woff2",
+        "assets/fonts/manrope-latin-ext-wght.woff2",
+    ),
+];
 
 static WEB_SOURCE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web");
 
 #[derive(Debug)]
 pub(crate) struct ApplicationGenerationSummary {
     pub(crate) files: usize,
-    pub(crate) bytes: usize,
 }
 
 #[derive(Template)]
@@ -106,6 +115,8 @@ struct ApplicationDocumentTemplate<'a> {
     manifest_url: &'a str,
     favicon_url: &'a str,
     apple_touch_icon_url: &'a str,
+    font_latin_url: &'a str,
+    font_latin_ext_url: &'a str,
     design_tokens_stylesheet_url: &'a str,
     foundation_stylesheet_url: &'a str,
     locations_stylesheet_url: &'a str,
@@ -113,6 +124,7 @@ struct ApplicationDocumentTemplate<'a> {
     interactions_stylesheet_url: &'a str,
     main_script_url: &'a str,
     icon_license_url: &'a str,
+    font_license_url: &'a str,
 }
 
 #[derive(Serialize)]
@@ -159,7 +171,6 @@ pub(crate) fn generate_application(
 
     let summary = ApplicationGenerationSummary {
         files: files.file_count(),
-        bytes: files.total_bytes(),
     };
     publish_application_directory(&staging, &output_directory, &files)?;
     Ok(summary)
@@ -173,9 +184,11 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     for (source, destination) in STYLE_ASSETS
         .into_iter()
         .chain(APPLICATION_ICON_ASSETS)
+        .chain(FONT_ASSETS)
         .chain([
             ("favicon.svg", "favicon.svg"),
             ("icons/LICENSE", "assets/licenses/lucide.txt"),
+            ("fonts/OFL.txt", "assets/licenses/manrope.txt"),
         ])
     {
         let output_path = insert_hashed_asset(&mut files, destination, source_file(source)?)?;
@@ -232,6 +245,8 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let icon_symbols = build_icon_symbols()?;
     let favicon_url = asset_url(&asset_paths, "favicon.svg")?;
     let apple_touch_icon_url = asset_url(&asset_paths, "assets/icons/apple-touch-icon.png")?;
+    let font_latin_url = asset_url(&asset_paths, "assets/fonts/manrope-latin-wght.woff2")?;
+    let font_latin_ext_url = asset_url(&asset_paths, "assets/fonts/manrope-latin-ext-wght.woff2")?;
     let design_tokens_stylesheet_url = asset_url(&asset_paths, "assets/styles/design-tokens.css")?;
     let foundation_stylesheet_url = asset_url(&asset_paths, "assets/styles/foundation.css")?;
     let locations_stylesheet_url = asset_url(&asset_paths, "assets/styles/locations.css")?;
@@ -239,6 +254,7 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let interactions_stylesheet_url = asset_url(&asset_paths, "assets/styles/interactions.css")?;
     let main_script_url = asset_url(&asset_paths, "assets/scripts/main.js")?;
     let icon_license_url = asset_url(&asset_paths, "assets/licenses/lucide.txt")?;
+    let font_license_url = asset_url(&asset_paths, "assets/licenses/manrope.txt")?;
     let index = ApplicationDocumentTemplate {
         application_name: APPLICATION_NAME,
         description: APPLICATION_DESCRIPTION,
@@ -249,6 +265,8 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
         manifest_url: &manifest_url,
         favicon_url: &favicon_url,
         apple_touch_icon_url: &apple_touch_icon_url,
+        font_latin_url: &font_latin_url,
+        font_latin_ext_url: &font_latin_ext_url,
         design_tokens_stylesheet_url: &design_tokens_stylesheet_url,
         foundation_stylesheet_url: &foundation_stylesheet_url,
         locations_stylesheet_url: &locations_stylesheet_url,
@@ -256,6 +274,7 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
         interactions_stylesheet_url: &interactions_stylesheet_url,
         main_script_url: &main_script_url,
         icon_license_url: &icon_license_url,
+        font_license_url: &font_license_url,
     }
     .render()
     .context("failed to render application document")?;

@@ -52,7 +52,6 @@ async fn build(args: BuildArgs) -> Result<()> {
                 data_url = args.data,
                 output = %args.output.display(),
                 files = summary.files,
-                bytes = summary.bytes,
                 "app generated"
             );
         }
