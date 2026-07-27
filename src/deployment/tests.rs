@@ -37,19 +37,20 @@ fn prepares_recursive_app_deployment_with_entry_point_last() {
 }
 
 #[test]
-fn prepares_data_deployment_in_stable_order_with_mime_fallback() {
+fn prepares_data_deployment_with_catalog_last() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let input = temporary_root.path().join("weather-data");
-    fs::create_dir(&input).expect("data directory should be created");
-    fs::write(input.join("z.json"), "{}").expect("JSON file should be created");
-    fs::write(input.join("catalog"), "catalog").expect("extensionless file should be created");
+    fs::create_dir_all(input.join("forecasts/35")).expect("forecast directory should be created");
+    fs::write(input.join("catalog.json"), "{}").expect("catalog should be created");
+    fs::write(input.join("forecasts/35/000"), "forecast")
+        .expect("extensionless forecast should be created");
 
     let files =
         prepare_deployment(&input, DeploymentKind::Data).expect("data deployment should prepare");
 
-    assert_eq!(files[0].key, "catalog");
+    assert_eq!(files[0].key, "forecasts/35/000");
     assert_eq!(files[0].content_type, "application/octet-stream");
-    assert_eq!(files[1].key, "z.json");
+    assert_eq!(files[1].key, "catalog.json");
     assert_eq!(files[1].content_type, "application/json");
 }
 

@@ -262,8 +262,8 @@ fn replaces_existing_generated_data_output() {
     let output_directory = temporary_root.path().join("data");
     fs::create_dir(&output_directory).expect("output directory should be created");
     fs::write(
-        output_directory.join("municipalities.json"),
-        r#"{"generator":"cielo","source":{"name":"AEMET","url":"https://opendata.aemet.es/"},"municipalities":[]}"#,
+        output_directory.join("catalog.json"),
+        r#"{"generator":"cielo","provinces":[{"name":"Madrid","tz":"Europe/Madrid","municipalities":[]}]}"#,
     )
     .expect("catalog should be created");
     fs::write(output_directory.join("stale.json"), "{}").expect("stale file should be created");
@@ -271,15 +271,15 @@ fn replaces_existing_generated_data_output() {
     let (output_directory, staging) = create_staging_directory(&output_directory, OutputKind::Data)
         .expect("generated data output should be recognized");
     fs::write(
-        staging.path().join("municipalities.json"),
-        r#"{"generator":"cielo","source":{"name":"AEMET","url":"https://opendata.aemet.es/"},"municipalities":[]}"#,
+        staging.path().join("catalog.json"),
+        r#"{"generator":"cielo","provinces":[{"name":"Madrid","tz":"Europe/Madrid","municipalities":[]}]}"#,
     )
     .expect("replacement catalog should be created");
     publish_staging_directory(&staging, &output_directory, OutputKind::Data)
         .expect("generated data output should be replaced");
 
     assert!(!output_directory.join("stale.json").exists());
-    assert!(output_directory.join("municipalities.json").is_file());
+    assert!(output_directory.join("catalog.json").is_file());
 }
 
 #[test]
@@ -559,12 +559,14 @@ fn builds_weather_snapshot() {
     assert_eq!(snapshot.municipalities[0].province, "Las Palmas");
     assert_eq!(snapshot.forecasts[0].hourly_forecasts.len(), 1);
 
-    let serialized = serde_json::to_value(&snapshot.forecasts[0].hourly_forecasts[0])
-        .expect("hourly forecast should serialize");
-    assert_eq!(serialized["temperature_celsius"], 24);
-    assert_eq!(serialized["condition"], "cloud-sun");
-    assert!(serialized.get("celsius").is_none());
-    assert!(serialized.get("state").is_none());
+    assert_eq!(
+        snapshot.forecasts[0].hourly_forecasts[0].temperature_celsius,
+        24
+    );
+    assert_eq!(
+        snapshot.forecasts[0].hourly_forecasts[0].condition,
+        WeatherCondition::CloudSun
+    );
 }
 
 #[test]
@@ -578,30 +580,40 @@ fn writes_readable_weather_data_files() {
 
     assert_eq!(
         output_paths(temporary_root.path()),
-        ["hourly_forecasts/35/000.json", "municipalities.json"]
+        ["catalog.json", "forecasts/35/000.json"]
     );
     assert_eq!(bundle_files, 1);
     let catalog: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("municipalities.json"))
-            .expect("catalog should be readable"),
+        &fs::read(temporary_root.path().join("catalog.json")).expect("catalog should be readable"),
     )
     .expect("catalog should decode");
     let bundle: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("hourly_forecasts/35/000.json"))
+        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
             .expect("forecast bundle should be readable"),
     )
     .expect("forecast bundle should decode");
-    let forecast = &bundle["municipalities"]["35001"];
+    let forecast = &bundle["forecasts"]["35001"];
 
     assert_eq!(catalog["generator"], "cielo");
-    assert!(catalog.get("schema_version").is_none());
-    assert_eq!(catalog["source"]["generated_at"], "2026-07-25T08:00:00");
-    assert_eq!(catalog["municipalities"][0]["time_zone"], "Atlantic/Canary");
-    assert_eq!(bundle["generator"], "cielo");
-    assert!(bundle.get("forecasts").is_none());
-    assert_eq!(forecast["municipality_id"], "35001");
-    assert_eq!(forecast["hourly_forecasts"][0]["temperature_celsius"], 24);
-    assert!(forecast.get("temperatures").is_none());
+    assert_eq!(catalog["updated_at"], "2026-07-25T08:00:00");
+    assert_eq!(catalog["provinces"][0]["name"], "Las Palmas");
+    assert_eq!(catalog["provinces"][0]["tz"], "Atlantic/Canary");
+    assert_eq!(catalog["provinces"][0]["municipalities"][0]["id"], "35001");
+    assert_eq!(forecast[0]["date"], "2026-07-25");
+    assert_eq!(forecast[0]["hours"][0]["temp_c"], 24);
+    assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
+    assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
+
+    // Generated JSON has no formatting-only whitespace.
+    for path in [
+        temporary_root.path().join("catalog.json"),
+        temporary_root.path().join("forecasts/35/000.json"),
+    ] {
+        let bytes = fs::read(path).expect("weather-data file should be readable");
+        assert_eq!(bytes.last(), Some(&b'}'));
+        assert!(!bytes.contains(&b'\n'));
+        assert!(!bytes.contains(&b'\t'));
+    }
 }
 
 #[test]
@@ -626,31 +638,25 @@ fn groups_forecasts_into_stable_twenty_id_ranges() {
     assert_eq!(
         output_paths(temporary_root.path()),
         [
-            "hourly_forecasts/35/000.json",
-            "hourly_forecasts/35/020.json",
-            "hourly_forecasts/36/000.json",
-            "municipalities.json",
+            "catalog.json",
+            "forecasts/35/000.json",
+            "forecasts/35/020.json",
+            "forecasts/36/000.json",
         ]
     );
     let first_bundle: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("hourly_forecasts/35/000.json"))
+        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
             .expect("first bundle should be readable"),
     )
     .expect("first bundle should decode");
-    let municipalities = first_bundle["municipalities"]
+    let forecasts = first_bundle["forecasts"]
         .as_object()
-        .expect("bundle municipalities should be an object");
+        .expect("bundle forecasts should be an object");
     assert_eq!(
-        municipalities
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
+        forecasts.keys().map(String::as_str).collect::<Vec<_>>(),
         ["35000", "35019"]
     );
-    assert_eq!(
-        municipalities["35019"]["municipality_id"],
-        serde_json::Value::String("35019".to_owned())
-    );
+    assert!(forecasts["35019"].get("municipality_id").is_none());
 }
 
 #[test]
@@ -765,10 +771,12 @@ fn local_javascript_specifiers(source: &str) -> Vec<String> {
 fn assert_application_manifest(root: &Path, paths: &[String], index: &str) {
     let manifest_path = find_hashed_path(paths, "", "manifest", "webmanifest");
     assert!(index.contains(&format!("./{manifest_path}")));
-    let manifest: serde_json::Value = serde_json::from_slice(
-        &fs::read(root.join(manifest_path)).expect("manifest should be readable"),
-    )
-    .expect("manifest should decode");
+    let manifest_bytes = fs::read(root.join(manifest_path)).expect("manifest should be readable");
+    assert_eq!(manifest_bytes.last(), Some(&b'}'));
+    assert!(!manifest_bytes.contains(&b'\n'));
+    assert!(!manifest_bytes.contains(&b'\t'));
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&manifest_bytes).expect("manifest should decode");
     assert_eq!(manifest["id"], "./");
     assert_eq!(manifest["start_url"], "./");
     for icon in manifest["icons"]
@@ -956,10 +964,15 @@ fn sample_source_data() -> AemetWeatherData {
 }
 
 fn sample_forecast(id: &str) -> MunicipalityForecast {
+    let province = match id.get(..2) {
+        Some("36") => "Pontevedra",
+        _ => "Las Palmas (Gran Canaria)",
+    };
+
     MunicipalityForecast {
         id: id.to_owned(),
         name: "Forecast fallback".to_owned(),
-        province: "Las Palmas (Gran Canaria)".to_owned(),
+        province: province.to_owned(),
         generated_at: "2026-07-25T08:00:00".to_owned(),
         hourly_forecasts: vec![HourlyForecast {
             date: "2026-07-25".to_owned(),

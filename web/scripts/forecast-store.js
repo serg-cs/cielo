@@ -3,18 +3,12 @@ import {
   readValidatedJson,
 } from "./weather-data-client.js";
 
-const generatorIdentity = "cielo";
 const hourlyForecastPeriodCount = 24;
 const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
 const temperatureMinimum = -32_768;
 const temperatureMaximum = 32_767;
 const forecastBundleRangeSize = 20;
-const supportedTimeZones = new Set([
-  "Africa/Ceuta",
-  "Atlantic/Canary",
-  "Europe/Madrid",
-]);
 const supportedConditions = new Set([
   "cloud",
   "cloud-drizzle",
@@ -43,13 +37,16 @@ const supportedConditions = new Set([
  */
 
 /**
- * @typedef {object} ForecastTimeline
+ * @typedef {object} ParsedForecast
  * @property {string} municipalityId
- * @property {string} timeZone
  * @property {Map<string, CurrentConditions>} forecastsByHour
  */
 
-/** @typedef {Map<string, ForecastTimeline>} ForecastBundle */
+/** @typedef {Map<string, ParsedForecast>} ForecastBundle */
+
+/**
+ * @typedef {ParsedForecast & {timeZone: string}} ForecastTimeline
+ */
 
 /**
  * @typedef {object} HourlyForecastPeriod
@@ -71,12 +68,10 @@ export function validateForecastBundle(document) {
   if (
     typeof document !== "object" ||
     document === null ||
-    !("generator" in document) ||
-    document.generator !== generatorIdentity ||
-    !("municipalities" in document) ||
-    typeof document.municipalities !== "object" ||
-    document.municipalities === null ||
-    Array.isArray(document.municipalities)
+    !("forecasts" in document) ||
+    typeof document.forecasts !== "object" ||
+    document.forecasts === null ||
+    Array.isArray(document.forecasts)
   ) {
     throw new Error("El documento de previsiones no es válido");
   }
@@ -84,8 +79,11 @@ export function validateForecastBundle(document) {
   // Validate every keyed member before exposing any forecast from the bundle.
   const forecasts = new Map();
   for (const [municipalityId, forecastDocument] of Object.entries(
-    document.municipalities,
+    document.forecasts,
   )) {
+    if (!isMunicipalityId(municipalityId)) {
+      throw new Error("El documento de previsiones no es válido");
+    }
     const forecast = validateForecastDocument(
       forecastDocument,
       municipalityId,
@@ -101,45 +99,40 @@ export function validateForecastBundle(document) {
 /**
  * @param {unknown} document
  * @param {string} municipalityId
- * @returns {ForecastTimeline}
+ * @returns {ParsedForecast}
  */
 function validateForecastDocument(document, municipalityId) {
   if (
-    typeof document !== "object" ||
-    document === null ||
-    !("municipality_id" in document) ||
-    document.municipality_id !== municipalityId ||
-    !("time_zone" in document) ||
-    typeof document.time_zone !== "string" ||
-    !supportedTimeZones.has(document.time_zone) ||
-    !("hourly_forecasts" in document) ||
-    !Array.isArray(document.hourly_forecasts) ||
-    document.hourly_forecasts.length === 0
+    !Array.isArray(document) ||
+    document.length === 0
   ) {
     throw new Error("El documento de previsión no es válido");
   }
 
   // Index exact local hours while rejecting ambiguous forecast documents.
   const forecastsByHour = new Map();
-  for (const hourlyForecast of document.hourly_forecasts) {
-    if (!isHourlyForecast(hourlyForecast)) {
+  const forecastDates = new Set();
+  for (const day of document) {
+    if (!isForecastDay(day) || forecastDates.has(day.date)) {
       throw new Error("El documento de previsión no es válido");
     }
+    forecastDates.add(day.date);
 
-    const key = forecastKey(hourlyForecast.date, hourlyForecast.hour);
-    if (forecastsByHour.has(key)) {
-      throw new Error("El documento de previsión contiene horas duplicadas");
+    for (const hourlyForecast of day.hours) {
+      const key = forecastKey(day.date, hourlyForecast.hour);
+      if (forecastsByHour.has(key)) {
+        throw new Error("El documento de previsión contiene horas duplicadas");
+      }
+      forecastsByHour.set(key, {
+        temperatureCelsius: hourlyForecast.temp_c,
+        condition: hourlyForecast.state,
+        description: hourlyForecast.desc,
+      });
     }
-    forecastsByHour.set(key, {
-      temperatureCelsius: hourlyForecast.temperature_celsius,
-      condition: hourlyForecast.condition,
-      description: hourlyForecast.description,
-    });
   }
 
   return {
     municipalityId,
-    timeZone: document.time_zone,
     forecastsByHour,
   };
 }
@@ -153,9 +146,12 @@ function validateForecastDocument(document, municipalityId) {
  */
 function forecastForMunicipality(bundle, municipality) {
   const forecast = bundle.get(municipality.id);
-  return forecast !== undefined && forecast.timeZone === municipality.timeZone
-    ? forecast
-    : null;
+  return forecast === undefined
+    ? null
+    : {
+      ...forecast,
+      timeZone: municipality.timeZone,
+    };
 }
 
 /**
@@ -686,7 +682,7 @@ export class ForecastStore extends EventTarget {
 
 /** @param {URL} weatherDataUrl @param {string} municipalityId */
 export function forecastBundleUrl(weatherDataUrl, municipalityId) {
-  if (!/^\d{5}$/u.test(municipalityId)) {
+  if (!isMunicipalityId(municipalityId)) {
     throw new Error("El identificador del municipio no es válido");
   }
 
@@ -696,33 +692,50 @@ export function forecastBundleUrl(weatherDataUrl, municipalityId) {
     Math.floor(municipalityNumber / forecastBundleRangeSize) *
     forecastBundleRangeSize;
   return new URL(
-    `hourly_forecasts/${province}/${String(rangeStart).padStart(3, "0")}.json`,
+    `forecasts/${province}/${String(rangeStart).padStart(3, "0")}.json`,
     weatherDataUrl,
   );
 }
 
+/** @param {unknown} value @returns {value is string} */
+function isMunicipalityId(value) {
+  return typeof value === "string" && /^\d{5}$/u.test(value);
+}
+
 /** @param {unknown} value */
-function isHourlyForecast(value) {
+function isForecastDay(value) {
   return (
     typeof value === "object" &&
     value !== null &&
     "date" in value &&
     typeof value.date === "string" &&
     isForecastDate(value.date) &&
+    "hours" in value &&
+    Array.isArray(value.hours) &&
+    value.hours.length > 0 &&
+    value.hours.every(isForecastHour)
+  );
+}
+
+/** @param {unknown} value */
+function isForecastHour(value) {
+  return (
+    typeof value === "object" &&
+    value !== null &&
     "hour" in value &&
     Number.isInteger(value.hour) &&
     value.hour >= 0 &&
     value.hour <= 23 &&
-    "temperature_celsius" in value &&
-    Number.isInteger(value.temperature_celsius) &&
-    value.temperature_celsius >= temperatureMinimum &&
-    value.temperature_celsius <= temperatureMaximum &&
-    "condition" in value &&
-    typeof value.condition === "string" &&
-    supportedConditions.has(value.condition) &&
-    "description" in value &&
-    typeof value.description === "string" &&
-    value.description.trim().length > 0
+    "temp_c" in value &&
+    Number.isInteger(value.temp_c) &&
+    value.temp_c >= temperatureMinimum &&
+    value.temp_c <= temperatureMaximum &&
+    "state" in value &&
+    typeof value.state === "string" &&
+    supportedConditions.has(value.state) &&
+    "desc" in value &&
+    typeof value.desc === "string" &&
+    value.desc.trim().length > 0
   );
 }
 

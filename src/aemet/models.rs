@@ -20,7 +20,7 @@ pub(crate) struct MunicipalityForecast {
 }
 
 /// Conditions and temperature for one local forecast hour.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HourlyForecast {
     pub(crate) date: String,
     pub(crate) hour: u8,

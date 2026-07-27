@@ -222,9 +222,7 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
             },
         ],
     };
-    let mut manifest_bytes =
-        serde_json::to_vec_pretty(&manifest).context("failed to encode web manifest")?;
-    manifest_bytes.push(b'\n');
+    let manifest_bytes = serde_json::to_vec(&manifest).context("failed to encode web manifest")?;
     let manifest_url = format!(
         "./{}",
         insert_hashed_asset(&mut files, "manifest.webmanifest", manifest_bytes)?

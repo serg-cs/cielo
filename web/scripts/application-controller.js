@@ -49,7 +49,7 @@ export class ApplicationController {
       window.location.href,
     );
     this.#municipalityCatalogUrl = new URL(
-      "municipalities.json",
+      "catalog.json",
       this.#weatherDataUrl,
     );
     this.#forecastStore = new ForecastStore(this.#weatherDataUrl);

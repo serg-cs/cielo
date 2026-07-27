@@ -11,8 +11,6 @@ use tracing::warn;
 use super::{GENERATOR_IDENTITY, files::GeneratedFiles};
 
 const APP_GENERATOR_DECLARATION: &str = r#"<meta name="generator" content="cielo">"#;
-const AEMET_SOURCE_NAME: &str = "AEMET";
-const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum OutputKind {
@@ -32,15 +30,7 @@ impl OutputKind {
 #[derive(Deserialize)]
 struct CatalogIdentity {
     generator: String,
-    source: SourceIdentity,
-    #[serde(rename = "municipalities")]
-    _municipalities: Vec<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct SourceIdentity {
-    name: String,
-    url: String,
+    provinces: Vec<serde_json::Value>,
 }
 
 pub(super) fn create_staging_directory(
@@ -291,15 +281,13 @@ fn is_generated_app(path: &Path) -> Result<bool> {
 }
 
 fn is_generated_data(path: &Path) -> Result<bool> {
-    let Some(catalog) = read_optional_file(&path.join("municipalities.json"))? else {
+    let Some(catalog) = read_optional_file(&path.join("catalog.json"))? else {
         return Ok(false);
     };
     let Ok(identity) = serde_json::from_slice::<CatalogIdentity>(&catalog) else {
         return Ok(false);
     };
-    Ok(identity.generator == GENERATOR_IDENTITY
-        && identity.source.name == AEMET_SOURCE_NAME
-        && identity.source.url == AEMET_SOURCE_URL)
+    Ok(identity.generator == GENERATOR_IDENTITY && !identity.provinces.is_empty())
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {

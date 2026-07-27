@@ -26,8 +26,13 @@ export const minimumSearchLength = 2;
  * @typedef {object} PublishedMunicipality
  * @property {string} id
  * @property {string} name
- * @property {string} province
- * @property {string} time_zone
+ */
+
+/**
+ * @typedef {object} PublishedProvince
+ * @property {string} name
+ * @property {string} tz
+ * @property {PublishedMunicipality[]} municipalities
  */
 
 /**
@@ -59,39 +64,66 @@ export function validateMunicipalityCatalog(document) {
     document === null ||
     !("generator" in document) ||
     document.generator !== generatorIdentity ||
-    !("municipalities" in document) ||
-    !Array.isArray(document.municipalities) ||
-    !document.municipalities.every(isMunicipality) ||
-    !("source" in document) ||
-    !isCatalogSource(document.source)
+    !("updated_at" in document) ||
+    typeof document.updated_at !== "string" ||
+    !sourceGenerationTimePattern.test(document.updated_at) ||
+    !("provinces" in document) ||
+    !Array.isArray(document.provinces) ||
+    document.provinces.length === 0 ||
+    !document.provinces.every(isProvince)
   ) {
     throw new Error("El documento de municipios no es válido");
   }
 
+  // Expand shared province data while rejecting ambiguous identifiers.
+  const provinceNames = new Set();
+  const municipalityIds = new Set();
+  const municipalities = [];
+  for (const province of document.provinces) {
+    if (provinceNames.has(province.name)) {
+      throw new Error("El documento de municipios no es válido");
+    }
+    provinceNames.add(province.name);
+
+    for (const municipality of province.municipalities) {
+      if (municipalityIds.has(municipality.id)) {
+        throw new Error("El documento de municipios no es válido");
+      }
+      municipalityIds.add(municipality.id);
+      municipalities.push({
+        id: municipality.id,
+        name: municipality.name,
+        province: province.name,
+        timeZone: province.tz,
+        searchName: normalizeSearchText(municipality.name),
+      });
+    }
+  }
+
   return {
-    municipalities: document.municipalities.map((municipality) => ({
-      id: municipality.id,
-      name: municipality.name,
-      province: municipality.province,
-      timeZone: municipality.time_zone,
-      searchName: normalizeSearchText(municipality.name),
-    })),
-    generatedAt: document.source.generated_at,
+    municipalities,
+    generatedAt: document.updated_at,
   };
 }
 
-/** @param {unknown} value */
-function isCatalogSource(value) {
+/**
+ * @param {unknown} value
+ * @returns {value is PublishedProvince}
+ */
+function isProvince(value) {
   return (
     typeof value === "object" &&
     value !== null &&
     "name" in value &&
-    value.name === "AEMET" &&
-    "url" in value &&
-    value.url === "https://opendata.aemet.es/" &&
-    "generated_at" in value &&
-    typeof value.generated_at === "string" &&
-    sourceGenerationTimePattern.test(value.generated_at)
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    "tz" in value &&
+    typeof value.tz === "string" &&
+    supportedTimezones.has(value.tz) &&
+    "municipalities" in value &&
+    Array.isArray(value.municipalities) &&
+    value.municipalities.length > 0 &&
+    value.municipalities.every(isMunicipality)
   );
 }
 
@@ -105,13 +137,10 @@ function isMunicipality(value) {
     value !== null &&
     "id" in value &&
     typeof value.id === "string" &&
+    /^\d{5}$/u.test(value.id) &&
     "name" in value &&
     typeof value.name === "string" &&
-    "province" in value &&
-    typeof value.province === "string" &&
-    "time_zone" in value &&
-    typeof value.time_zone === "string" &&
-    supportedTimezones.has(value.time_zone)
+    value.name.trim().length > 0
   );
 }
 

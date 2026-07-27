@@ -10,17 +10,16 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::aemet::{
-    AemetClient, AemetWeatherData, HourlyForecast, MunicipalityForecast, validate_municipality_id,
+    AemetClient, AemetWeatherData, HourlyForecast, MunicipalityForecast, WeatherCondition,
+    validate_municipality_id,
 };
 
 use super::GENERATOR_IDENTITY;
 use super::publisher::{OutputKind, create_staging_directory, publish_staging_directory};
 
-const AEMET_SOURCE_NAME: &str = "AEMET";
-const AEMET_SOURCE_URL: &str = "https://opendata.aemet.es/";
 const FORECAST_BUNDLE_RANGE_SIZE: u16 = 20;
-const HOURLY_FORECASTS_DIRECTORY: &str = "hourly_forecasts";
-const MUNICIPALITIES_FILENAME: &str = "municipalities.json";
+const FORECASTS_DIRECTORY: &str = "forecasts";
+const CATALOG_FILENAME: &str = "catalog.json";
 
 #[derive(Debug)]
 pub(crate) struct WeatherDataGenerationSummary {
@@ -31,21 +30,13 @@ pub(crate) struct WeatherDataGenerationSummary {
 }
 
 #[derive(Debug, Serialize)]
-struct Source<'a> {
-    name: &'a str,
-    url: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    generated_at: Option<&'a str>,
-}
-
-#[derive(Debug, Serialize)]
 struct MunicipalityCatalogDocument<'a> {
     generator: &'a str,
-    source: Source<'a>,
-    municipalities: &'a [MunicipalityRecord],
+    updated_at: &'a str,
+    provinces: Vec<ProvinceDocument<'a>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub(super) struct MunicipalityRecord {
     pub(super) id: String,
     pub(super) name: String,
@@ -54,20 +45,38 @@ pub(super) struct MunicipalityRecord {
 }
 
 #[derive(Debug, Serialize)]
-struct MunicipalityForecastDocument<'a> {
-    source: Source<'a>,
-    municipality_id: &'a str,
-    time_zone: TimeZone,
-    hourly_forecasts: &'a [HourlyForecast],
+struct ProvinceDocument<'a> {
+    name: &'a str,
+    tz: TimeZone,
+    municipalities: Vec<CatalogMunicipalityDocument<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct CatalogMunicipalityDocument<'a> {
+    id: &'a str,
+    name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct ForecastDayDocument<'a> {
+    date: &'a str,
+    hours: Vec<ForecastHourDocument<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ForecastHourDocument<'a> {
+    hour: u8,
+    temp_c: i16,
+    state: WeatherCondition,
+    desc: &'a str,
 }
 
 #[derive(Debug, Serialize)]
 struct ForecastBundleDocument<'a> {
-    generator: &'a str,
-    municipalities: BTreeMap<&'a str, MunicipalityForecastDocument<'a>>,
+    forecasts: BTreeMap<&'a str, Vec<ForecastDayDocument<'a>>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub(super) enum TimeZone {
     #[serde(rename = "Africa/Ceuta")]
     AfricaCeuta,
@@ -173,55 +182,91 @@ pub(super) fn write_weather_data_files(
         .map(|forecast| forecast.generated_at.as_str())
         .max()
         .context("weather snapshot does not contain forecasts")?;
-    let hourly_forecasts_directory = output_directory.join(HOURLY_FORECASTS_DIRECTORY);
-    fs::create_dir(&hourly_forecasts_directory)
-        .context("failed to create hourly forecast directory")?;
+    let forecasts_directory = output_directory.join(FORECASTS_DIRECTORY);
+    fs::create_dir(&forecasts_directory).context("failed to create forecast directory")?;
 
     // Publish the newest source time with the catalog for the locations footer.
     let catalog = MunicipalityCatalogDocument {
         generator: GENERATOR_IDENTITY,
-        source: Source {
-            name: AEMET_SOURCE_NAME,
-            url: AEMET_SOURCE_URL,
-            generated_at: Some(latest_generation_time),
-        },
-        municipalities: &snapshot.municipalities,
+        updated_at: latest_generation_time,
+        provinces: group_municipalities_by_province(&snapshot.municipalities)?,
     };
     write_json(
         output_directory,
-        Path::new(MUNICIPALITIES_FILENAME),
+        Path::new(CATALOG_FILENAME),
         &catalog,
         statistics,
     )?;
 
     // Group stable numeric ID ranges before serializing each bundle once.
-    let mut bundles = BTreeMap::<PathBuf, BTreeMap<&str, MunicipalityForecastDocument>>::new();
+    let mut bundles = BTreeMap::<PathBuf, BTreeMap<&str, Vec<ForecastDayDocument>>>::new();
     for forecast in &snapshot.forecasts {
-        let document = MunicipalityForecastDocument {
-            source: Source {
-                name: AEMET_SOURCE_NAME,
-                url: AEMET_SOURCE_URL,
-                generated_at: Some(&forecast.generated_at),
-            },
-            municipality_id: &forecast.id,
-            time_zone: time_zone_for(&forecast.id),
-            hourly_forecasts: &forecast.hourly_forecasts,
-        };
         bundles
             .entry(forecast_bundle_path(&forecast.id)?)
             .or_default()
-            .insert(&forecast.id, document);
+            .insert(
+                &forecast.id,
+                group_forecast_days(&forecast.hourly_forecasts),
+            );
     }
 
     let forecast_bundle_files = bundles.len();
-    for (relative_path, municipalities) in bundles {
-        let document = ForecastBundleDocument {
-            generator: GENERATOR_IDENTITY,
-            municipalities,
-        };
+    for (relative_path, forecasts) in bundles {
+        let document = ForecastBundleDocument { forecasts };
         write_json(output_directory, &relative_path, &document, statistics)?;
     }
     Ok(forecast_bundle_files)
+}
+
+fn group_municipalities_by_province(
+    municipalities: &[MunicipalityRecord],
+) -> Result<Vec<ProvinceDocument<'_>>> {
+    let mut provinces = BTreeMap::<&str, (TimeZone, Vec<CatalogMunicipalityDocument>)>::new();
+    for municipality in municipalities {
+        let (time_zone, records) = provinces
+            .entry(&municipality.province)
+            .or_insert_with(|| (municipality.time_zone, Vec::new()));
+        if *time_zone != municipality.time_zone {
+            bail!(
+                "province {} contains municipalities in different time zones",
+                municipality.province
+            );
+        }
+        records.push(CatalogMunicipalityDocument {
+            id: &municipality.id,
+            name: &municipality.name,
+        });
+    }
+
+    Ok(provinces
+        .into_iter()
+        .map(|(name, (tz, municipalities))| ProvinceDocument {
+            name,
+            tz,
+            municipalities,
+        })
+        .collect())
+}
+
+fn group_forecast_days(hourly_forecasts: &[HourlyForecast]) -> Vec<ForecastDayDocument<'_>> {
+    let mut days = BTreeMap::<&str, Vec<ForecastHourDocument>>::new();
+    for forecast in hourly_forecasts {
+        days.entry(&forecast.date)
+            .or_default()
+            .push(ForecastHourDocument {
+                hour: forecast.hour,
+                temp_c: forecast.temperature_celsius,
+                state: forecast.condition,
+                desc: &forecast.description,
+            });
+    }
+
+    days.into_iter()
+        .map(|(date, mut hours)| {
+            hours.sort_by_key(|forecast| forecast.hour);
+            ForecastDayDocument { date, hours }
+        })
+        .collect()
 }
 
 fn forecast_bundle_path(municipality_id: &str) -> Result<PathBuf> {
@@ -232,7 +277,7 @@ fn forecast_bundle_path(municipality_id: &str) -> Result<PathBuf> {
         .with_context(|| format!("invalid municipality ID: {municipality_id}"))?;
     let range_start = municipality_number / FORECAST_BUNDLE_RANGE_SIZE * FORECAST_BUNDLE_RANGE_SIZE;
 
-    Ok(Path::new(HOURLY_FORECASTS_DIRECTORY)
+    Ok(Path::new(FORECASTS_DIRECTORY)
         .join(province)
         .join(format!("{range_start:03}.json")))
 }
@@ -243,9 +288,8 @@ fn write_json(
     value: &impl Serialize,
     statistics: &mut WeatherDataStatistics,
 ) -> Result<()> {
-    let mut bytes = serde_json::to_vec(value)
+    let bytes = serde_json::to_vec(value)
         .with_context(|| format!("failed to serialize {}", relative_path.display()))?;
-    bytes.push(b'\n');
     write_bytes(&output_directory.join(relative_path), &bytes)?;
     statistics.record(&bytes);
     Ok(())

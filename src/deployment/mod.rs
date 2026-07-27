@@ -19,6 +19,7 @@ mod tests;
 
 const DEFAULT_REGION: &str = "us-east-1";
 const APP_ENTRY_POINT: &str = "index.html";
+const DATA_ENTRY_POINT: &str = "catalog.json";
 const CONTENT_HASH_LENGTH: usize = 64;
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
@@ -198,21 +199,24 @@ fn prepare_deployment(input: &Path, kind: DeploymentKind) -> Result<Vec<Deployme
         bail!("input directory contains no files: {}", input.display());
     }
 
-    // Keep deployment order stable and publish the app entry point only at the end.
+    // Keep deployment order stable and publish each consumer entry point only at the end.
     files.sort_unstable_by(|left, right| left.key.cmp(&right.key));
-    if kind == DeploymentKind::App {
-        let index = files
-            .iter()
-            .position(|file| file.key == APP_ENTRY_POINT)
-            .with_context(|| {
-                format!(
-                    "app input directory does not contain root {APP_ENTRY_POINT}: {}",
-                    input.display()
-                )
-            })?;
-        let entry_point = files.remove(index);
-        files.push(entry_point);
-    }
+    let entry_point = match kind {
+        DeploymentKind::App => APP_ENTRY_POINT,
+        DeploymentKind::Data => DATA_ENTRY_POINT,
+    };
+    let index = files
+        .iter()
+        .position(|file| file.key == entry_point)
+        .with_context(|| {
+            format!(
+                "{} input directory does not contain root {entry_point}: {}",
+                kind.as_str(),
+                input.display()
+            )
+        })?;
+    let entry_point = files.remove(index);
+    files.push(entry_point);
 
     Ok(files)
 }

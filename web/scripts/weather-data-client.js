@@ -29,7 +29,7 @@ export async function readValidatedJson(url, validate) {
   try {
     return validate(await response.json());
   } catch (error) {
-    // Never reuse a response that no longer satisfies the application schema.
+    // Never reuse a response that no longer satisfies application validation.
     console.warn("Se descartaron datos guardados no válidos", error);
     try {
       await cache.delete(url);
