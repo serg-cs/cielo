@@ -13,7 +13,7 @@ pub(crate) use normalization::validate_municipality_id;
 #[cfg(test)]
 use anyhow::Result;
 #[cfg(test)]
-use client::{MAX_ATTEMPTS, RequestKind, parse_retry_after, redact_url};
+use client::{MAX_ATTEMPTS, RequestKind, RetryKind, parse_retry_after, redact_url, retry_delay};
 #[cfg(test)]
 use decoding::repair_iso_8859_15_mojibake;
 #[cfg(test)]

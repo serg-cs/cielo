@@ -651,6 +651,55 @@ fn parses_retry_after_seconds_and_http_dates() {
 }
 
 #[test]
+fn applies_a_longer_backoff_to_rate_limits() {
+    let delays = (0..MAX_ATTEMPTS - 1)
+        .map(|attempt| {
+            retry_delay(
+                attempt,
+                Duration::from_secs(1),
+                None,
+                RetryKind::RateLimited,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        delays,
+        [
+            Duration::from_secs(15),
+            Duration::from_secs(30),
+            Duration::from_mins(1),
+        ]
+    );
+}
+
+#[test]
+fn preserves_transient_backoff_and_rate_limit_minimums() {
+    assert_eq!(
+        retry_delay(2, Duration::from_secs(1), None, RetryKind::Transient,),
+        Duration::from_secs(4)
+    );
+    assert_eq!(
+        retry_delay(
+            1,
+            Duration::from_secs(1),
+            Some(Duration::from_secs(10)),
+            RetryKind::RateLimited,
+        ),
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        retry_delay(
+            1,
+            Duration::from_secs(1),
+            Some(Duration::from_secs(90)),
+            RetryKind::RateLimited,
+        ),
+        Duration::from_secs(90)
+    );
+}
+
+#[test]
 fn redacts_sensitive_url_components() {
     let url = Url::parse("https://example.com/opaque-access-token?secret=value#fragment")
         .expect("test URL should parse");

@@ -19,6 +19,8 @@ mod tests;
 
 const DEFAULT_REGION: &str = "us-east-1";
 const APP_ENTRY_POINT: &str = "index.html";
+const CONTENT_HASH_LENGTH: usize = 64;
+const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
 /// Select validation and ordering rules for a deployment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +51,8 @@ struct DeploymentFile {
     key: String,
     content_type: String,
     bytes: u64,
+
+    cache_control: Option<&'static str>,
 }
 
 pub(crate) async fn deploy_directory(
@@ -173,14 +177,19 @@ fn prepare_deployment(input: &Path, kind: DeploymentKind) -> Result<Vec<Deployme
             let metadata = entry
                 .metadata()
                 .with_context(|| format!("failed to inspect input file {}", path.display()))?;
+            let key = object_key(relative)?;
+            let content_type = mime_guess::from_path(&path)
+                .first_or_octet_stream()
+                .essence_str()
+                .to_owned();
+            let cache_control = cache_control(&key);
             files.push(DeploymentFile {
-                key: object_key(relative)?,
-                content_type: mime_guess::from_path(&path)
-                    .first_or_octet_stream()
-                    .essence_str()
-                    .to_owned(),
                 source: path,
+                key,
+                content_type,
                 bytes: metadata.len(),
+
+                cache_control,
             });
         }
     }
@@ -229,26 +238,48 @@ fn object_key(relative: &Path) -> Result<String> {
     Ok(components.join("/"))
 }
 
+fn cache_control(key: &str) -> Option<&'static str> {
+    is_content_hashed_key(key).then_some(IMMUTABLE_CACHE_CONTROL)
+}
+
+fn is_content_hashed_key(key: &str) -> bool {
+    let file_name = key.rsplit('/').next().unwrap_or(key);
+    let Some((stem_and_hash, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    let Some((stem, hash)) = stem_and_hash.rsplit_once('.') else {
+        return false;
+    };
+
+    !stem.is_empty()
+        && !extension.is_empty()
+        && hash.len() == CONTENT_HASH_LENGTH
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
 async fn upload_files(client: &Client, bucket: &str, files: &[DeploymentFile]) -> Result<()> {
     for file in files {
         let body = ByteStream::from_path(&file.source)
             .await
             .with_context(|| format!("failed to open input file {}", file.source.display()))?;
-        client
+        let mut upload = client
             .put_object()
             .bucket(bucket)
             .key(&file.key)
             .content_type(&file.content_type)
-            .body(body)
-            .send()
-            .await
-            .map_err(|error| {
-                anyhow!(
-                    "failed to upload {} to bucket {bucket}: {}",
-                    file.key,
-                    DisplayErrorContext(error)
-                )
-            })?;
+            .body(body);
+        if let Some(cache_control) = file.cache_control {
+            upload = upload.cache_control(cache_control);
+        }
+        upload.send().await.map_err(|error| {
+            anyhow!(
+                "failed to upload {} to bucket {bucket}: {}",
+                file.key,
+                DisplayErrorContext(error)
+            )
+        })?;
     }
 
     Ok(())

@@ -10,7 +10,10 @@ use aws_sdk_s3::{
 
 use crate::cli::DeployTargetArgs;
 
-use super::{DeploymentKind, create_service_config, prepare_deployment, upload_files};
+use super::{
+    DeploymentKind, IMMUTABLE_CACHE_CONTROL, create_service_config, prepare_deployment,
+    upload_files,
+};
 
 #[test]
 fn prepares_recursive_app_deployment_with_entry_point_last() {
@@ -48,6 +51,34 @@ fn prepares_data_deployment_in_stable_order_with_mime_fallback() {
     assert_eq!(files[0].content_type, "application/octet-stream");
     assert_eq!(files[1].key, "z.json");
     assert_eq!(files[1].content_type, "application/json");
+}
+
+#[test]
+fn assigns_immutable_caching_only_to_content_hashed_files() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let input = temporary_root.path().join("application");
+    fs::create_dir(&input).expect("app directory should be created");
+    let hash = "a".repeat(64);
+    let hashed_key = format!("app.{hash}.js");
+    fs::write(input.join(&hashed_key), "script").expect("hashed script should be created");
+    fs::write(input.join("index.html"), "<html></html>").expect("index should be created");
+    fs::write(input.join(format!("app.{}.js", "A".repeat(64))), "script")
+        .expect("non-hashed script should be created");
+
+    let files =
+        prepare_deployment(&input, DeploymentKind::App).expect("app deployment should prepare");
+    let hashed_file = files
+        .iter()
+        .find(|file| file.key == hashed_key)
+        .expect("hashed script should be prepared");
+
+    assert_eq!(hashed_file.cache_control, Some(IMMUTABLE_CACHE_CONTROL));
+    assert!(
+        files
+            .iter()
+            .filter(|file| file.key != hashed_file.key)
+            .all(|file| file.cache_control.is_none())
+    );
 }
 
 #[test]
@@ -110,6 +141,43 @@ async fn uploads_the_same_key_with_content_type_on_each_deployment() {
         .expect("second deployment should overwrite the same key");
 
     upload.assert_async().await;
+}
+
+#[tokio::test]
+async fn uploads_content_hashed_files_with_immutable_caching() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let input = temporary_root.path().join("application");
+    fs::create_dir(&input).expect("app directory should be created");
+    let hash = "a".repeat(64);
+    let asset_key = format!("app.{hash}.js");
+    fs::write(input.join(&asset_key), "script").expect("hashed script should be created");
+    fs::write(input.join("index.html"), "<html></html>").expect("index should be created");
+    let files =
+        prepare_deployment(&input, DeploymentKind::App).expect("app deployment should prepare");
+    let mut server = mockito::Server::new_async().await;
+    let asset = server
+        .mock(
+            "PUT",
+            format!("/application/{asset_key}?x-id=PutObject").as_str(),
+        )
+        .match_header("cache-control", IMMUTABLE_CACHE_CONTROL)
+        .with_status(200)
+        .create_async()
+        .await;
+    let index = server
+        .mock("PUT", "/application/index.html?x-id=PutObject")
+        .match_header("cache-control", mockito::Matcher::Missing)
+        .with_status(200)
+        .create_async()
+        .await;
+    let client = test_client(&server.url());
+
+    upload_files(&client, "application", &files)
+        .await
+        .expect("application files should upload");
+
+    asset.assert_async().await;
+    index.assert_async().await;
 }
 
 #[tokio::test]

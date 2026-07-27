@@ -18,6 +18,7 @@ pub(super) const MAX_ATTEMPTS: usize = 4;
 const MAX_ENVELOPE_SIZE: usize = 64 * 1024;
 const MAX_FORECAST_ARCHIVE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_MUNICIPALITIES_SIZE: usize = 8 * 1024 * 1024;
+const RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 #[derive(Clone, Copy)]
@@ -34,6 +35,12 @@ impl RequestKind {
     fn has_sensitive_path(self) -> bool {
         matches!(self, Self::Data)
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum RetryKind {
+    Transient,
+    RateLimited,
 }
 
 /// HTTP adapter for AEMET's two-step `OpenData` protocol.
@@ -116,8 +123,16 @@ impl AemetClient {
 
             if is_retryable_code(envelope.status) && attempt + 1 < MAX_ATTEMPTS {
                 let reason = format!("AEMET envelope status {}", envelope.status);
-                self.wait_before_retry(attempt, None, &endpoint_url, RequestKind::Api, &reason)
-                    .await;
+                let retry_kind = retry_kind_for_code(envelope.status);
+                self.wait_before_retry(
+                    attempt,
+                    None,
+                    retry_kind,
+                    &endpoint_url,
+                    RequestKind::Api,
+                    &reason,
+                )
+                .await;
                 continue;
             }
 
@@ -147,8 +162,15 @@ impl AemetClient {
                 Ok(response) => response,
                 Err(error) if attempt + 1 < MAX_ATTEMPTS => {
                     let reason = error.without_url().to_string();
-                    self.wait_before_retry(attempt, None, &url, request_kind, &reason)
-                        .await;
+                    self.wait_before_retry(
+                        attempt,
+                        None,
+                        RetryKind::Transient,
+                        &url,
+                        request_kind,
+                        &reason,
+                    )
+                    .await;
                     continue;
                 }
                 Err(error) => {
@@ -166,7 +188,7 @@ impl AemetClient {
                 .and_then(parse_retry_after);
 
             if is_retryable(status) && attempt + 1 < MAX_ATTEMPTS {
-                self.wait_before_retry(attempt, retry_after, &url, request_kind, status.as_str())
+                self.wait_before_status_retry(attempt, retry_after, status, &url, request_kind)
                     .await;
                 continue;
             }
@@ -204,8 +226,15 @@ impl AemetClient {
                     Ok(None) => return Ok(body),
                     Err(error) if attempt + 1 < MAX_ATTEMPTS => {
                         let reason = error.without_url().to_string();
-                        self.wait_before_retry(attempt, None, &url, request_kind, &reason)
-                            .await;
+                        self.wait_before_retry(
+                            attempt,
+                            None,
+                            RetryKind::Transient,
+                            &url,
+                            request_kind,
+                            &reason,
+                        )
+                        .await;
                         continue 'attempts;
                     }
                     Err(error) => {
@@ -226,17 +255,35 @@ impl AemetClient {
         )
     }
 
+    async fn wait_before_status_retry(
+        &self,
+        attempt: usize,
+        retry_after: Option<Duration>,
+        status: StatusCode,
+        url: &Url,
+        request_kind: RequestKind,
+    ) {
+        self.wait_before_retry(
+            attempt,
+            retry_after,
+            retry_kind_for_status(status),
+            url,
+            request_kind,
+            status.as_str(),
+        )
+        .await;
+    }
+
     async fn wait_before_retry(
         &self,
         attempt: usize,
         retry_after: Option<Duration>,
+        retry_kind: RetryKind,
         url: &Url,
         request_kind: RequestKind,
         reason: &str,
     ) {
-        let shift = u32::try_from(attempt).unwrap_or(u32::MAX);
-        let multiplier = 1_u32.checked_shl(shift).unwrap_or(u32::MAX);
-        let delay = retry_after.unwrap_or_else(|| self.retry_base_delay.saturating_mul(multiplier));
+        let delay = retry_delay(attempt, self.retry_base_delay, retry_after, retry_kind);
         warn!(
             attempt = attempt + 1,
             delay_seconds = delay.as_secs_f64(),
@@ -275,6 +322,39 @@ fn is_retryable(status: StatusCode) -> bool {
 
 fn is_retryable_code(status: u16) -> bool {
     StatusCode::from_u16(status).is_ok_and(is_retryable)
+}
+
+fn retry_kind_for_status(status: StatusCode) -> RetryKind {
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        RetryKind::RateLimited
+    } else {
+        RetryKind::Transient
+    }
+}
+
+fn retry_kind_for_code(status: u16) -> RetryKind {
+    StatusCode::from_u16(status).map_or(RetryKind::Transient, retry_kind_for_status)
+}
+
+pub(super) fn retry_delay(
+    attempt: usize,
+    retry_base_delay: Duration,
+    retry_after: Option<Duration>,
+    retry_kind: RetryKind,
+) -> Duration {
+    let shift = u32::try_from(attempt).unwrap_or(u32::MAX);
+    let multiplier = 1_u32.checked_shl(shift).unwrap_or(u32::MAX);
+    let base_delay = match retry_kind {
+        RetryKind::Transient => retry_base_delay,
+        RetryKind::RateLimited => RATE_LIMIT_RETRY_BASE_DELAY,
+    };
+    let fallback_delay = base_delay.saturating_mul(multiplier);
+
+    match (retry_kind, retry_after) {
+        (RetryKind::RateLimited, Some(retry_after)) => fallback_delay.max(retry_after),
+        (_, Some(retry_after)) => retry_after,
+        (_, None) => fallback_delay,
+    }
 }
 
 pub(super) fn parse_retry_after(value: &str) -> Option<Duration> {
