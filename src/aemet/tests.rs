@@ -99,31 +99,43 @@ fn parses_and_orders_forecast_temperatures() {
 }
 
 #[test]
-fn rejects_scalar_sky_state_shape() {
-    let document = serde_json::json!({
-        "root": {
-            "id": "28079",
-            "elaborado": "2026-07-19T08:00:00",
-            "nombre": "Madrid",
-            "provincia": "Madrid",
-            "prediccion": {
-                "dia": [{
-                    "fecha": "2026-07-19",
-                    "estado_cielo": {
-                        "periodo": "10",
-                        "valor": "11",
-                        "descripcion": "Despejado"
-                    },
-                    "temperatura": {"periodo": "10", "valor": "27"}
-                }]
+fn normalizes_scalar_sky_state_shape() {
+    let archive = forecast_archive(
+        "localidad_h_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-19T08:00:00",
+                "nombre": "Madrid",
+                "provincia": "Madrid",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-19",
+                        "estado_cielo": {
+                            "periodo": "10",
+                            "valor": "11",
+                            "descripcion": "Despejado"
+                        },
+                        "temperatura": {"periodo": "10", "valor": "27"}
+                    }]
+                }
             }
-        }
-    });
+        }"#,
+    );
 
-    let error = serde_json::from_value::<ForecastDocument>(document)
-        .expect_err("AEMET condition data must use the observed array shape");
+    let forecasts = parse_forecast_archive(&archive).expect("scalar condition should parse");
 
-    assert!(error.to_string().contains("expected a sequence"));
+    assert_eq!(forecasts.len(), 1);
+    assert_eq!(
+        forecasts[0].hourly_forecasts,
+        vec![HourlyForecast {
+            date: "2026-07-19".to_owned(),
+            hour: 10,
+            temperature_celsius: 27,
+            condition: WeatherCondition::Sun,
+            description: "Despejado".to_owned(),
+        }]
+    );
 }
 
 #[test]

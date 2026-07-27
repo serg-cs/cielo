@@ -50,7 +50,11 @@ struct Prediction {
 struct ForecastDay {
     #[serde(rename = "fecha")]
     date: String,
-    #[serde(default, rename = "estado_cielo")]
+    #[serde(
+        default,
+        rename = "estado_cielo",
+        deserialize_with = "deserialize_one_or_many"
+    )]
     sky_states: Vec<ForecastSkyState>,
     #[serde(
         default,
