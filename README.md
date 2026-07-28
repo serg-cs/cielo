@@ -7,18 +7,43 @@ The application and forecast data are built separately. Application assets only
 need to be rebuilt when the app changes, while forecast data should be updated
 periodically.
 
-## Build
+## CLI Installation
 
-Run the build commands from the repository root. The data build fetches the
-latest forecast from AEMET, so the `AEMET_API_KEY` environment variable must be
-set first.
+### Building from source
+
+You can install the `cielo` CLI directly from GitHub using Cargo:
 
 ```sh
-cargo run -- build data --output dist/data
+cargo install --git https://github.com/serg-cs/cielo --locked
+```
+
+To update an existing installation, repeat the install command with `--force`.
+
+### Using Docker
+
+Alternatively, run the CLI with the container image published to GitHub
+Container Registry:
+
+```sh
+docker run --rm ghcr.io/serg-cs/cielo:latest --help
+```
+
+This is equivalent to `cielo --help`; arguments after the image are passed
+directly to Cielo.
+
+## Build
+
+The examples below use the installed `cielo` command and write the generated
+files to `dist` in the current directory.
+The data build fetches the latest forecast from AEMET, so the `AEMET_API_KEY`
+environment variable must be set first.
+
+```sh
+cielo build data --output dist/data
 ```
 
 ```sh
-cargo run -- build app --output dist/app --data ../data
+cielo build app --output dist/app --data ../data
 ```
 
 The `--output` option is a filesystem path, while `--data` is the URL that the
@@ -31,8 +56,7 @@ Serve their common `dist` directory:
 python3 -m http.server --directory dist 8000
 ```
 
-Then open
-[localhost:8000/app](http://localhost:8000/app/)
+Then open [localhost:8000/app](http://localhost:8000/app/).
 
 When the data is hosted separately, pass its public HTTP or HTTPS URL to
 `--data` instead.
@@ -42,12 +66,15 @@ When the data is hosted separately, pass its public HTTP or HTTPS URL to
 Built directories can be uploaded directly to an S3-compatible bucket.
 
 Credentials are read from environment variables `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` with support for custom endpoints and regions using
-parameters `--endpoint` and `--region`.
+`AWS_SECRET_ACCESS_KEY`. Custom endpoints and regions can be specified with
+`--endpoint` and `--region`.
 
 ```sh
-cargo run -- deploy app --input dist/app --bucket cielo-app --region auto
-cargo run -- deploy data --input dist/data --bucket cielo-data --region auto
+cielo deploy app --input dist/app --bucket cielo-app --region auto
+```
+
+```sh
+cielo deploy data --input dist/data --bucket cielo-data --region auto
 ```
 
 Deployment replaces objects with matching names but does not remove other
