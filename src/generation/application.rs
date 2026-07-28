@@ -621,7 +621,7 @@ pub(super) fn normalize_weather_data_url(value: &str) -> Result<String> {
         Err(_) => (
             validation_base
                 .join(value)
-                .with_context(|| format!("invalid weather-data URL: {value}"))?,
+                .context("invalid weather-data URL")?,
             false,
         ),
     };

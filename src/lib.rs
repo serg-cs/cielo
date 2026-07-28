@@ -49,7 +49,6 @@ async fn build(args: BuildArgs) -> Result<()> {
         BuildTarget::App(args) => {
             let summary = generation::generate_application(&args.output, &args.data)?;
             info!(
-                data_url = args.data,
                 output = %args.output.display(),
                 files = summary.files,
                 "app generated"
@@ -94,11 +93,10 @@ async fn deploy(args: DeployArgs) -> Result<()> {
 }
 
 async fn deploy_target(args: &DeployTargetArgs, kind: DeploymentKind) -> Result<()> {
-    // Upload one validated directory without exposing credentials in arguments or logs.
+    // Upload one validated directory without exposing deployment configuration.
     let summary = deployment::deploy_directory(args, kind).await?;
     info!(
         target = kind.as_str(),
-        bucket = args.bucket,
         files = summary.files,
         bytes = summary.bytes,
         "files deployed"

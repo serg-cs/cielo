@@ -72,6 +72,16 @@ fn rejects_unsupported_weather_data_urls() {
 }
 
 #[test]
+fn does_not_expose_invalid_weather_data_url() {
+    let data_url = "https://[private-data-endpoint";
+
+    let error =
+        normalize_weather_data_url(data_url).expect_err("invalid data URL should be rejected");
+
+    assert!(!format!("{error:#}").contains(data_url));
+}
+
+#[test]
 fn converts_canonical_svg_to_named_symbol() {
     let source = r#"<svg width="24" height='24' viewBox="0 0 24 24" stroke="currentColor"><path d="M1 2h3" /></svg>"#;
 

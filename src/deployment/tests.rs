@@ -211,25 +211,36 @@ async fn stops_before_uploading_index_when_an_asset_fails() {
     let files =
         prepare_deployment(&input, DeploymentKind::App).expect("app deployment should prepare");
     let mut server = mockito::Server::new_async().await;
+    let bucket = "private-application-bucket";
     let asset = server
-        .mock("PUT", "/application/app.js?x-id=PutObject")
+        .mock(
+            "PUT",
+            format!("/{bucket}/app.js?x-id=PutObject").as_str(),
+        )
         .with_status(400)
         .with_body("<Error><Code>InvalidRequest</Code></Error>")
         .create_async()
         .await;
     let index = server
-        .mock("PUT", "/application/index.html?x-id=PutObject")
+        .mock(
+            "PUT",
+            format!("/{bucket}/index.html?x-id=PutObject").as_str(),
+        )
         .expect(0)
         .with_status(200)
         .create_async()
         .await;
-    let client = test_client(&server.url());
+    let endpoint = server.url();
+    let client = test_client(&endpoint);
 
-    let error = upload_files(&client, "application", &files)
+    let error = upload_files(&client, bucket, &files)
         .await
         .expect_err("failed asset should stop deployment");
 
-    assert!(error.to_string().contains("failed to upload app.js"));
+    let message = format!("{error:#}");
+    assert!(message.contains("failed to upload app.js"));
+    assert!(!message.contains(bucket));
+    assert!(!message.contains(&endpoint));
     asset.assert_async().await;
     index.assert_async().await;
 }

@@ -6,17 +6,19 @@ fn build_app_does_not_require_api_key_environment_variable() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let mut command = cargo_bin_cmd!("cielo");
     let output_dir = temporary_root.path().join("application");
+    let data_url = "https://private-data-endpoint.example.test/weather";
 
     command
         .env_remove("AEMET_API_KEY")
         .arg("build")
         .arg("app")
         .arg("--data")
-        .arg("../weather-data/")
+        .arg(data_url)
         .arg("--output")
         .arg(&output_dir)
         .assert()
-        .success();
+        .success()
+        .stderr(predicate::str::contains(data_url).not());
 
     assert!(output_dir.join("index.html").is_file());
     assert!(!output_dir.join("weather-data").exists());

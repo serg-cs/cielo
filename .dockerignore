@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!.dockerignore
+!Cargo.toml
+!Cargo.lock
+!askama.toml
+!build.rs
+!src/
+!src/**
+!web/
+!web/**
+src/**/tests.rs

@@ -1,0 +1,38 @@
+name: Build and deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-container-image:
+    name: Build container image
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-container-image.yml
+
+  build-and-deploy-data:
+    name: Build and deploy data
+    needs: build-container-image
+    permissions:
+      packages: read
+    uses: ./.github/workflows/build-and-deploy-data.yml
+    secrets:
+      AEMET_API_KEY: ${{ secrets.AEMET_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+      DATA_BUCKET: ${{ secrets.DATA_BUCKET }}
+
+  build-and-deploy-app:
+    name: Build and deploy app
+    needs: build-and-deploy-data
+    permissions:
+      packages: read
+    uses: ./.github/workflows/build-and-deploy-app.yml
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+      APP_BUCKET: ${{ secrets.APP_BUCKET }}
+      APP_DATA_URL: ${{ secrets.APP_DATA_URL }}

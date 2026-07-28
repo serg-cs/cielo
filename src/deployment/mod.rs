@@ -8,7 +8,6 @@ use aws_config::{BehaviorVersion, SdkConfig, meta::region::RegionProviderChain};
 use aws_sdk_s3::{
     Client,
     config::{Builder as S3ConfigBuilder, Region},
-    error::DisplayErrorContext,
     primitives::ByteStream,
 };
 
@@ -277,13 +276,10 @@ async fn upload_files(client: &Client, bucket: &str, files: &[DeploymentFile]) -
         if let Some(cache_control) = file.cache_control {
             upload = upload.cache_control(cache_control);
         }
-        upload.send().await.map_err(|error| {
-            anyhow!(
-                "failed to upload {} to bucket {bucket}: {}",
-                file.key,
-                DisplayErrorContext(error)
-            )
-        })?;
+        upload
+            .send()
+            .await
+            .map_err(|_| anyhow!("failed to upload {}", file.key))?;
     }
 
     Ok(())

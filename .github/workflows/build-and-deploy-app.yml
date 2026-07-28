@@ -1,0 +1,47 @@
+name: Build and deploy app
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_ENDPOINT_URL:
+        required: true
+      APP_BUCKET:
+        required: true
+      APP_DATA_URL:
+        required: true
+
+permissions:
+  packages: read
+
+jobs:
+  build-and-deploy-app:
+    name: Build and deploy app
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Build app
+        env:
+          APP_DATA_URL: ${{ secrets.APP_DATA_URL }}
+        run: cielo build app --output /tmp/cielo-app --data "$APP_DATA_URL"
+
+      - name: Deploy app
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+          APP_BUCKET: ${{ secrets.APP_BUCKET }}
+        run: >-
+          cielo deploy app
+          --input /tmp/cielo-app
+          --bucket "$APP_BUCKET"
+          --endpoint "$AWS_ENDPOINT_URL"
+          --region auto
