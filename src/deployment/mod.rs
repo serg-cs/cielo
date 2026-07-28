@@ -19,7 +19,8 @@ mod tests;
 const DEFAULT_REGION: &str = "us-east-1";
 const APP_ENTRY_POINT: &str = "index.html";
 const DATA_ENTRY_POINT: &str = "catalog.json";
-const CONTENT_HASH_LENGTH: usize = 64;
+const CONTENT_HASH_LENGTH: usize = 16;
+const LEGACY_CONTENT_HASH_LENGTH: usize = 64;
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
 /// Select validation and ordering rules for a deployment.
@@ -256,7 +257,7 @@ fn is_content_hashed_key(key: &str) -> bool {
 
     !stem.is_empty()
         && !extension.is_empty()
-        && hash.len() == CONTENT_HASH_LENGTH
+        && matches!(hash.len(), CONTENT_HASH_LENGTH | LEGACY_CONTENT_HASH_LENGTH)
         && hash
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))

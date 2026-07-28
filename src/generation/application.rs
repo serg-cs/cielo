@@ -19,6 +19,7 @@ use super::{
 const APPLICATION_NAME: &str = "Cielo";
 const APPLICATION_DESCRIPTION: &str = "Municipios con predicción meteorológica de AEMET";
 const APPLICATION_THEME_COLOR: &str = "#285b78";
+pub(super) const CONTENT_HASH_LENGTH: usize = 16;
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 const STYLE_ASSETS: [(&str, &str); 5] = [
@@ -311,8 +312,8 @@ fn hashed_output_path(logical_path: &str, bytes: &[u8]) -> Result<String> {
 
 pub(super) fn content_hash(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    let mut encoded = String::with_capacity(CONTENT_HASH_LENGTH);
+    for byte in digest.iter().take(CONTENT_HASH_LENGTH / 2) {
         encoded.push(char::from(HEX_DIGITS[usize::from(byte >> 4)]));
         encoded.push(char::from(HEX_DIGITS[usize::from(byte & 0x0f)]));
     }

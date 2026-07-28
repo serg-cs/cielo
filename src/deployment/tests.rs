@@ -59,12 +59,19 @@ fn assigns_immutable_caching_only_to_content_hashed_files() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let input = temporary_root.path().join("application");
     fs::create_dir(&input).expect("app directory should be created");
-    let hash = "a".repeat(64);
-    let hashed_key = format!("app.{hash}.js");
+    let hashed_key = format!("app.{}.js", "a".repeat(16));
+    let legacy_hashed_key = format!("legacy.{}.js", "b".repeat(64));
     fs::write(input.join(&hashed_key), "script").expect("hashed script should be created");
+    fs::write(input.join(&legacy_hashed_key), "legacy script")
+        .expect("legacy hashed script should be created");
     fs::write(input.join("index.html"), "<html></html>").expect("index should be created");
-    fs::write(input.join(format!("app.{}.js", "A".repeat(64))), "script")
-        .expect("non-hashed script should be created");
+    fs::write(
+        input.join(format!("uppercase.{}.js", "A".repeat(16))),
+        "script",
+    )
+    .expect("uppercase hash script should be created");
+    fs::write(input.join(format!("short.{}.js", "a".repeat(15))), "script")
+        .expect("wrong-length hash script should be created");
 
     let files =
         prepare_deployment(&input, DeploymentKind::App).expect("app deployment should prepare");
@@ -72,12 +79,20 @@ fn assigns_immutable_caching_only_to_content_hashed_files() {
         .iter()
         .find(|file| file.key == hashed_key)
         .expect("hashed script should be prepared");
+    let legacy_hashed_file = files
+        .iter()
+        .find(|file| file.key == legacy_hashed_key)
+        .expect("legacy hashed script should be prepared");
 
     assert_eq!(hashed_file.cache_control, Some(IMMUTABLE_CACHE_CONTROL));
+    assert_eq!(
+        legacy_hashed_file.cache_control,
+        Some(IMMUTABLE_CACHE_CONTROL)
+    );
     assert!(
         files
             .iter()
-            .filter(|file| file.key != hashed_file.key)
+            .filter(|file| { file.key != hashed_file.key && file.key != legacy_hashed_file.key })
             .all(|file| file.cache_control.is_none())
     );
 }
@@ -88,7 +103,7 @@ fn prepares_hashed_woff2_with_font_content_type_and_immutable_caching() {
     let input = temporary_root.path().join("application");
     fs::create_dir_all(input.join("assets/fonts")).expect("font directory should be created");
     fs::write(input.join("index.html"), "<html></html>").expect("index should be created");
-    let font_key = format!("assets/fonts/manrope.{}.woff2", "a".repeat(64));
+    let font_key = format!("assets/fonts/manrope.{}.woff2", "a".repeat(16));
     fs::write(input.join(&font_key), "font").expect("font should be created");
 
     let files =
@@ -169,7 +184,7 @@ async fn uploads_content_hashed_files_with_immutable_caching() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let input = temporary_root.path().join("application");
     fs::create_dir(&input).expect("app directory should be created");
-    let hash = "a".repeat(64);
+    let hash = "a".repeat(16);
     let asset_key = format!("app.{hash}.js");
     fs::write(input.join(&asset_key), "script").expect("hashed script should be created");
     fs::write(input.join("index.html"), "<html></html>").expect("index should be created");

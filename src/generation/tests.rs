@@ -11,8 +11,9 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use super::{
     application::{
-        browser_asset_url, build_icon_symbol, build_script_assets_from_sources, content_hash,
-        generate_application, normalize_weather_data_url, normalized_logical_path,
+        CONTENT_HASH_LENGTH, browser_asset_url, build_icon_symbol,
+        build_script_assets_from_sources, content_hash, generate_application,
+        normalize_weather_data_url, normalized_logical_path,
     },
     files::GeneratedFiles,
     publisher::{
@@ -50,11 +51,15 @@ fn normalizes_browser_asset_url_separators() {
         "assets/scripts/dependency.js"
     );
     assert_eq!(
-        browser_asset_url(
-            r"assets\styles\foundation.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.css"
-        ),
-        "./assets/styles/foundation.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.css"
+        browser_asset_url(r"assets\styles\foundation.0123456789abcdef.css"),
+        "./assets/styles/foundation.0123456789abcdef.css"
     );
+}
+
+#[test]
+fn uses_a_short_sha256_prefix_for_content_hashes() {
+    assert_eq!(CONTENT_HASH_LENGTH, 16);
+    assert_eq!(content_hash(b""), "e3b0c44298fc1c14");
 }
 
 #[test]
@@ -728,7 +733,7 @@ fn find_hashed_path<'a>(
                 && path
                     .extension()
                     .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-                && hash.len() == 64
+                && hash.len() == CONTENT_HASH_LENGTH
                 && hash
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
