@@ -91,6 +91,7 @@
 
   .municipality-title-text {
     min-width: 0;
+    padding-block: 0.1em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
