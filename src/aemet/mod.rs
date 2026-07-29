@@ -7,7 +7,9 @@ mod normalization;
 mod tests;
 
 pub(crate) use client::AemetClient;
-pub(crate) use models::{AemetWeatherData, HourlyForecast, MunicipalityForecast, WeatherCondition};
+#[cfg(test)]
+pub(crate) use models::HourlyForecast;
+pub(crate) use models::{AemetWeatherData, DailyForecast, MunicipalityForecast, WeatherCondition};
 pub(crate) use normalization::validate_municipality_id;
 
 #[cfg(test)]

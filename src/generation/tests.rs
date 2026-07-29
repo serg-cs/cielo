@@ -4,7 +4,9 @@ use std::{
     path::Path,
 };
 
-use crate::aemet::{AemetWeatherData, HourlyForecast, MunicipalityForecast, WeatherCondition};
+use crate::aemet::{
+    AemetWeatherData, DailyForecast, HourlyForecast, MunicipalityForecast, WeatherCondition,
+};
 use html5ever::{parse_document, tendril::TendrilSink};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
@@ -570,14 +572,14 @@ fn builds_weather_snapshot() {
     assert_eq!(snapshot.municipalities[0].id, "35001");
     assert_eq!(snapshot.municipalities[0].name, "El Arco");
     assert_eq!(snapshot.municipalities[0].province, "Las Palmas");
-    assert_eq!(snapshot.forecasts[0].hourly_forecasts.len(), 1);
+    assert_eq!(snapshot.forecasts[0].daily_forecasts.len(), 1);
 
     assert_eq!(
-        snapshot.forecasts[0].hourly_forecasts[0].temperature_celsius,
+        snapshot.forecasts[0].daily_forecasts[0].hourly_forecasts[0].temperature_celsius,
         24
     );
     assert_eq!(
-        snapshot.forecasts[0].hourly_forecasts[0].condition,
+        snapshot.forecasts[0].daily_forecasts[0].hourly_forecasts[0].condition,
         WeatherCondition::CloudSun
     );
 }
@@ -613,6 +615,8 @@ fn writes_readable_weather_data_files() {
     assert_eq!(catalog["provinces"][0]["tz"], "Atlantic/Canary");
     assert_eq!(catalog["provinces"][0]["municipalities"][0]["id"], "35001");
     assert_eq!(forecast[0]["date"], "2026-07-25");
+    assert_eq!(forecast[0]["sunrise"], "07:10");
+    assert_eq!(forecast[0]["sunset"], "20:55");
     assert_eq!(forecast[0]["hours"][0]["temp_c"], 24);
     assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
     assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
@@ -915,7 +919,7 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         );
     }
 
-    assert_eq!(invariants.symbol_count, 19);
+    assert_eq!(invariants.symbol_count, 21);
     for target in invariants.use_targets {
         assert!(
             invariants.ids.contains(&target),
@@ -1011,12 +1015,16 @@ fn sample_forecast(id: &str) -> MunicipalityForecast {
         name: "Forecast fallback".to_owned(),
         province: province.to_owned(),
         generated_at: "2026-07-25T08:00:00".to_owned(),
-        hourly_forecasts: vec![HourlyForecast {
+        daily_forecasts: vec![DailyForecast {
             date: "2026-07-25".to_owned(),
-            hour: 10,
-            temperature_celsius: 24,
-            condition: WeatherCondition::CloudSun,
-            description: "Intervalos nubosos".to_owned(),
+            sunrise: "07:10".to_owned(),
+            sunset: "20:55".to_owned(),
+            hourly_forecasts: vec![HourlyForecast {
+                hour: 10,
+                temperature_celsius: 24,
+                condition: WeatherCondition::CloudSun,
+                description: "Intervalos nubosos".to_owned(),
+            }],
         }],
     }
 }

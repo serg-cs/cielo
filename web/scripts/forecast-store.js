@@ -6,6 +6,7 @@ import {
 const hourlyForecastPeriodCount = 24;
 const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
+const minuteMilliseconds = 60 * 1_000;
 const temperatureMinimum = -32_768;
 const temperatureMaximum = 32_767;
 const forecastBundleRangeSize = 20;
@@ -40,9 +41,16 @@ const supportedConditions = new Set([
  * @typedef {object} ParsedForecast
  * @property {string} municipalityId
  * @property {Map<string, CurrentConditions>} forecastsByHour
+ * @property {Map<string, SolarTimes>} solarTimesByDate
  */
 
 /** @typedef {Map<string, ParsedForecast>} ForecastBundle */
+
+/**
+ * @typedef {object} SolarTimes
+ * @property {string} sunrise
+ * @property {string} sunset
+ */
 
 /**
  * @typedef {ParsedForecast & {timeZone: string}} ForecastTimeline
@@ -50,9 +58,19 @@ const supportedConditions = new Set([
 
 /**
  * @typedef {object} HourlyForecastPeriod
+ * @property {"forecast"} kind
+ * @property {string} date
  * @property {number} hour
  * @property {CurrentConditions | null} forecast
  */
+
+/**
+ * @typedef {object} SolarEventPeriod
+ * @property {"sunrise" | "sunset"} kind
+ * @property {string} time
+ */
+
+/** @typedef {HourlyForecastPeriod | SolarEventPeriod} HourlyTimelinePeriod */
 
 /**
  * @typedef {object} CurrentConditionsChangeDetail
@@ -111,12 +129,17 @@ function validateForecastDocument(document, municipalityId) {
 
   // Index exact local hours while rejecting ambiguous forecast documents.
   const forecastsByHour = new Map();
+  const solarTimesByDate = new Map();
   const forecastDates = new Set();
   for (const day of document) {
     if (!isForecastDay(day) || forecastDates.has(day.date)) {
       throw new Error("El documento de previsión no es válido");
     }
     forecastDates.add(day.date);
+    solarTimesByDate.set(day.date, {
+      sunrise: day.sunrise,
+      sunset: day.sunset,
+    });
 
     for (const hourlyForecast of day.hours) {
       const key = forecastKey(day.date, hourlyForecast.hour);
@@ -134,6 +157,7 @@ function validateForecastDocument(document, municipalityId) {
   return {
     municipalityId,
     forecastsByHour,
+    solarTimesByDate,
   };
 }
 
@@ -167,30 +191,70 @@ export function selectCurrentConditions(forecast, now = new Date()) {
 /**
  * @param {ForecastTimeline} forecast
  * @param {Date} [now]
- * @returns {HourlyForecastPeriod[]}
+ * @returns {HourlyTimelinePeriod[]}
  */
 export function selectHourlyForecastPeriods(forecast, now = new Date()) {
   const currentHour = now.getTime() - now.getTime() % hourMilliseconds;
+  const currentTime = forecastTime(now, forecast.timeZone);
 
   // Walk real elapsed hours so local labels remain correct across day and DST changes.
-  return Array.from({ length: hourlyForecastPeriodCount }, (_, index) => {
-    const instant = new Date(currentHour + index * hourMilliseconds);
-    const { key, hour } = forecastTime(instant, forecast.timeZone);
-    return {
-      hour,
-      forecast: forecast.forecastsByHour.get(key) ?? null,
-    };
-  });
+  const hourlyPeriods = Array.from(
+    { length: hourlyForecastPeriodCount },
+    (_, index) => {
+      const instant = new Date(currentHour + index * hourMilliseconds);
+      const { date, key, hour } = forecastTime(instant, forecast.timeZone);
+      return {
+        kind: "forecast",
+        date,
+        hour,
+        forecast: forecast.forecastsByHour.get(key) ?? null,
+      };
+    },
+  );
+
+  // Insert each event once after the local hour containing it.
+  const timeline = [];
+  const insertedEvents = new Set();
+  for (const [index, period] of hourlyPeriods.entries()) {
+    timeline.push(period);
+    const solarTimes = forecast.solarTimesByDate.get(period.date);
+    if (solarTimes === undefined) {
+      continue;
+    }
+
+    const events = [
+      { kind: "sunrise", time: solarTimes.sunrise },
+      { kind: "sunset", time: solarTimes.sunset },
+    ].sort((left, right) => left.time.localeCompare(right.time));
+    for (const event of events) {
+      const eventKey = `${period.date}:${event.kind}`;
+      const { hour, minute } = solarTimeParts(event.time);
+      const occurredThisHour = index === 0 &&
+        hour === currentTime.hour &&
+        minute <= currentTime.minute;
+      if (
+        hour === period.hour &&
+        !occurredThisHour &&
+        !insertedEvents.has(eventKey)
+      ) {
+        timeline.push(event);
+        insertedEvents.add(eventKey);
+      }
+    }
+  }
+  return timeline;
 }
 
 /**
  * @param {CurrentConditions | null} currentConditions
- * @param {HourlyForecastPeriod[]} hourlyForecastPeriods
+ * @param {HourlyTimelinePeriod[]} hourlyForecastPeriods
  * @returns {boolean}
  */
 function forecastPeriodsAreUsable(currentConditions, hourlyForecastPeriods) {
   return currentConditions !== null ||
-    hourlyForecastPeriods.some((period) => period.forecast !== null);
+    hourlyForecastPeriods.some(
+      (period) => period.kind === "forecast" && period.forecast !== null,
+    );
 }
 
 export class ForecastStore extends EventTarget {
@@ -198,6 +262,7 @@ export class ForecastStore extends EventTarget {
   #savedMunicipalityIds = new Set();
   #forecasts = new Map();
   #currentConditionsById = new Map();
+  #hourlyForecastPeriodsById = new Map();
   #forecastStatuses = new Map();
   #cacheReads = new Map();
   #inFlight = new Map();
@@ -207,6 +272,7 @@ export class ForecastStore extends EventTarget {
   #running = false;
   #refreshTimeoutId = null;
   #hourTimeoutId = null;
+  #minuteTimeoutId = null;
 
   /**
    * @param {URL} weatherDataUrl
@@ -246,6 +312,7 @@ export class ForecastStore extends EventTarget {
     void this.#hydrateAndRefreshIds([...this.#savedMunicipalityIds]);
     this.#scheduleRefresh();
     this.#scheduleHourBoundary();
+    this.#scheduleMinuteBoundary();
   }
 
   stop() {
@@ -300,7 +367,7 @@ export class ForecastStore extends EventTarget {
     return this.#currentConditionsById.get(municipalityId) ?? null;
   }
 
-  /** @param {string} municipalityId @returns {HourlyForecastPeriod[]} */
+  /** @param {string} municipalityId @returns {HourlyTimelinePeriod[]} */
   getHourlyForecastPeriods(municipalityId) {
     const forecast = this.#forecasts.get(municipalityId);
     return forecast === undefined
@@ -578,9 +645,22 @@ export class ForecastStore extends EventTarget {
 
   /**
    * @param {string} municipalityId
-   * @param {HourlyForecastPeriod[]} periods
+   * @param {HourlyTimelinePeriod[]} periods
    */
   #publishHourlyForecastPeriods(municipalityId, periods) {
+    const previous = this.#hourlyForecastPeriodsById.get(municipalityId);
+    if (
+      (previous === undefined && periods.length === 0) ||
+      previous !== undefined && hourlyForecastPeriodsAreEqual(previous, periods)
+    ) {
+      return;
+    }
+
+    if (periods.length === 0) {
+      this.#hourlyForecastPeriodsById.delete(municipalityId);
+    } else {
+      this.#hourlyForecastPeriodsById.set(municipalityId, periods);
+    }
     this.dispatchEvent(
       new CustomEvent("hourlyforecastchange", {
         detail: { municipalityId, periods },
@@ -638,6 +718,25 @@ export class ForecastStore extends EventTarget {
     }, millisecondsUntilNextHour + 50);
   }
 
+  #scheduleMinuteBoundary() {
+    if (this.#minuteTimeoutId !== null) {
+      window.clearTimeout(this.#minuteTimeoutId);
+      this.#minuteTimeoutId = null;
+    }
+    if (!this.#running || document.visibilityState !== "visible") {
+      return;
+    }
+
+    const now = this.#now();
+    const millisecondsUntilNextMinute =
+      minuteMilliseconds - (now.getTime() % minuteMilliseconds);
+    this.#minuteTimeoutId = window.setTimeout(() => {
+      this.#minuteTimeoutId = null;
+      this.#recomputeForecastSelections();
+      this.#scheduleMinuteBoundary();
+    }, millisecondsUntilNextMinute + 50);
+  }
+
   #clearTimers() {
     if (this.#refreshTimeoutId !== null) {
       window.clearTimeout(this.#refreshTimeoutId);
@@ -646,6 +745,10 @@ export class ForecastStore extends EventTarget {
     if (this.#hourTimeoutId !== null) {
       window.clearTimeout(this.#hourTimeoutId);
       this.#hourTimeoutId = null;
+    }
+    if (this.#minuteTimeoutId !== null) {
+      window.clearTimeout(this.#minuteTimeoutId);
+      this.#minuteTimeoutId = null;
     }
   }
 
@@ -673,6 +776,7 @@ export class ForecastStore extends EventTarget {
       void this.refreshNow();
       this.#scheduleRefresh();
       this.#scheduleHourBoundary();
+      this.#scheduleMinuteBoundary();
       return;
     }
 
@@ -710,6 +814,11 @@ function isForecastDay(value) {
     "date" in value &&
     typeof value.date === "string" &&
     isForecastDate(value.date) &&
+    "sunrise" in value &&
+    isSolarTime(value.sunrise) &&
+    "sunset" in value &&
+    isSolarTime(value.sunset) &&
+    value.sunrise < value.sunset &&
     "hours" in value &&
     Array.isArray(value.hours) &&
     value.hours.length > 0 &&
@@ -770,6 +879,25 @@ function maximumDayOfMonth(year, month) {
   return isLeapYear ? 29 : 28;
 }
 
+/** @param {unknown} value */
+function isSolarTime(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = /^(\d{2}):(\d{2})$/u.exec(value);
+  return match !== null &&
+    Number(match[1]) <= 23 &&
+    Number(match[2]) <= 59;
+}
+
+/** @param {string} time */
+function solarTimeParts(time) {
+  return {
+    hour: Number(time.slice(0, 2)),
+    minute: Number(time.slice(3, 5)),
+  };
+}
+
 /** @param {Date} now @param {string} timeZone */
 function currentConditionsKey(now, timeZone) {
   return forecastTime(now, timeZone).key;
@@ -783,14 +911,17 @@ function forecastTime(instant, timeZone) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
     hourCycle: "h23",
   });
   const parts = Object.fromEntries(
     formatter.formatToParts(instant).map(({ type, value }) => [type, value]),
   );
   return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
     key: `${parts.year}-${parts.month}-${parts.day}:${parts.hour}`,
     hour: Number(parts.hour),
+    minute: Number(parts.minute),
   };
 }
 
@@ -810,4 +941,24 @@ function currentConditionsAreEqual(left, right) {
       left.temperatureCelsius === right.temperatureCelsius &&
       left.condition === right.condition &&
       left.description === right.description;
+}
+
+/**
+ * @param {HourlyTimelinePeriod[]} left
+ * @param {HourlyTimelinePeriod[]} right
+ */
+function hourlyForecastPeriodsAreEqual(left, right) {
+  return left.length === right.length &&
+    left.every((period, index) => {
+      const other = right[index];
+      if (other === undefined || period.kind !== other.kind) {
+        return false;
+      }
+      if (period.kind !== "forecast" || other.kind !== "forecast") {
+        return period.time === other.time;
+      }
+      return period.date === other.date &&
+        period.hour === other.hour &&
+        currentConditionsAreEqual(period.forecast, other.forecast);
+    });
 }

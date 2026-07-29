@@ -28,7 +28,6 @@ export class ForecastController {
     this.#elements = captureForecastElements(root);
     this.#onCloseRequest = onCloseRequest;
     this.#onClose = onClose;
-    this.#createHourlyItems();
     this.#installInteractions();
   }
 
@@ -229,33 +228,28 @@ export class ForecastController {
     this.#backSwipe.touchId = null;
   }
 
-  #createHourlyItems() {
-    this.#hourlyItems = Array.from({ length: 24 }, () => {
-      const fragment = this.#elements.hourlyPeriodTemplate.content.cloneNode(true);
-      const element = fragment.firstElementChild;
-      if (!(element instanceof HTMLLIElement)) {
-        throw new Error("No se pudo crear la previsión por horas");
-      }
+  #createHourlyItem() {
+    const fragment = this.#elements.hourlyPeriodTemplate.content.cloneNode(true);
+    const element = fragment.firstElementChild;
+    if (!(element instanceof HTMLLIElement)) {
+      throw new Error("No se pudo crear la previsión por horas");
+    }
 
-      return {
-        element,
-        hour: requiredElement(
-          element.querySelector(".hourly-hour"),
-          HTMLElement,
-        ),
-        icon: requiredElement(
-          element.querySelector(".hourly-condition-icon"),
-          SVGElement,
-        ),
-        temperature: requiredElement(
-          element.querySelector(".hourly-temperature"),
-          HTMLElement,
-        ),
-      };
-    });
-    this.#elements.hourlyList.replaceChildren(
-      ...this.#hourlyItems.map(({ element }) => element),
-    );
+    return {
+      element,
+      hour: requiredElement(
+        element.querySelector(".hourly-hour"),
+        HTMLElement,
+      ),
+      icon: requiredElement(
+        element.querySelector(".hourly-condition-icon"),
+        SVGElement,
+      ),
+      temperature: requiredElement(
+        element.querySelector(".hourly-temperature"),
+        HTMLElement,
+      ),
+    };
   }
 
   #renderCurrentConditions() {
@@ -289,24 +283,44 @@ export class ForecastController {
   #renderHourlyForecast() {
     const hasHourlyForecast = this.#hasHourlyForecast;
     this.#elements.hourlyForecastSection.hidden = !hasHourlyForecast;
+    this.#hourlyItems = this.#hourlyForecastPeriods.map(
+      () => this.#createHourlyItem(),
+    );
+    this.#elements.hourlyList.replaceChildren(
+      ...this.#hourlyItems.map(({ element }) => element),
+    );
+
+    let forecastIndex = 0;
     for (const [index, { element, hour, icon, temperature }] of
       this.#hourlyItems.entries()) {
-      const period = this.#hourlyForecastPeriods[index] ?? null;
-      const isCurrent = index === 0;
-      const hourLabel = isCurrent ? "Ahora" : String(period?.hour ?? "");
+      const period = this.#hourlyForecastPeriods[index];
+      if (period === undefined) {
+        continue;
+      }
+      const isForecast = period.kind === "forecast";
+      const isCurrent = isForecast && forecastIndex === 0;
+      if (isForecast) {
+        forecastIndex += 1;
+      }
 
+      element.dataset.kind = period.kind;
       element.dataset.current = String(isCurrent);
       element.setAttribute(
         "aria-label",
         formatHourlyForecastLabel(period, isCurrent),
       );
-      element.hidden = period === null;
-      hour.textContent = hourLabel;
-      temperature.textContent = period === null ||
-          period.forecast === null
-        ? "—"
-        : `${period.forecast.temperatureCelsius}°`;
-      setDynamicIcon(icon, period?.forecast?.condition ?? null);
+      if (isForecast) {
+        hour.textContent = isCurrent ? "Ahora" : String(period.hour);
+        temperature.textContent = period.forecast === null
+          ? "—"
+          : `${period.forecast.temperatureCelsius}°`;
+        setDynamicIcon(icon, period.forecast?.condition ?? null);
+        continue;
+      }
+
+      hour.textContent = displaySolarTime(period.time);
+      temperature.textContent = solarEventLabel(period.kind);
+      setDynamicIcon(icon, period.kind);
     }
 
     if (hasHourlyForecast && this.#resetHourlyScrollOnRender) {
@@ -332,7 +346,7 @@ export class ForecastController {
 
   get #hasHourlyForecast() {
     return this.#hourlyForecastPeriods.some(
-      (period) => period.forecast !== null,
+      (period) => period.kind === "forecast" && period.forecast !== null,
     );
   }
 
@@ -415,8 +429,8 @@ function captureForecastElements(root) {
 }
 
 function formatHourlyForecastLabel(period, isCurrent) {
-  if (period === null) {
-    return "";
+  if (period.kind !== "forecast") {
+    return `${solarEventLabel(period.kind)} a las ${displaySolarTime(period.time)}`;
   }
   const hourLabel = isCurrent
     ? "Ahora"
@@ -426,4 +440,12 @@ function formatHourlyForecastLabel(period, isCurrent) {
   }
 
   return `${hourLabel}. ${period.forecast.temperatureCelsius} grados Celsius. ${period.forecast.description}`;
+}
+
+function displaySolarTime(time) {
+  return time.startsWith("0") ? time.slice(1) : time;
+}
+
+function solarEventLabel(kind) {
+  return kind === "sunrise" ? "Amanecer" : "Atardecer";
 }

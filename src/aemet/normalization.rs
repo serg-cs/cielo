@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use tracing::warn;
 
 use super::decoding::{decode_iso_8859_15, repair_iso_8859_15_mojibake};
-use super::models::{HourlyForecast, MunicipalityForecast, WeatherCondition};
+use super::models::{DailyForecast, HourlyForecast, MunicipalityForecast, WeatherCondition};
 
 const MAX_ARCHIVE_ENTRY_SIZE: u64 = 1024 * 1024;
 const MAX_DECOMPRESSED_ARCHIVE_SIZE: u64 = 256 * 1024 * 1024;
@@ -50,6 +50,10 @@ struct Prediction {
 struct ForecastDay {
     #[serde(rename = "fecha")]
     date: String,
+    #[serde(rename = "orto")]
+    sunrise: String,
+    #[serde(rename = "ocaso")]
+    sunset: String,
     #[serde(
         default,
         rename = "estado_cielo",
@@ -211,10 +215,19 @@ pub(super) fn normalize_forecast(
 
     // Normalize conditions independently so source array order cannot affect joins.
     let mut conditions = BTreeMap::new();
+    let mut daily_forecasts = BTreeMap::new();
     let mut temperature_values = Vec::new();
     for day in root.prediction.days {
-        validate_date(&day.date)?;
-        for value in day.sky_states {
+        let ForecastDay {
+            date,
+            sunrise,
+            sunset,
+            sky_states,
+            temperatures,
+        } = day;
+        insert_daily_forecast(&mut daily_forecasts, &root.id, &date, sunrise, sunset)?;
+
+        for value in sky_states {
             let hour = value
                 .hour
                 .parse::<u8>()
@@ -235,7 +248,7 @@ pub(super) fn normalize_forecast(
                 bail!("empty condition description in forecast {}", root.id);
             }
 
-            let key = (day.date.clone(), hour);
+            let key = (date.clone(), hour);
             if conditions
                 .insert(
                     key,
@@ -250,7 +263,7 @@ pub(super) fn normalize_forecast(
             }
         }
 
-        for value in day.temperatures {
+        for value in temperatures {
             let hour = value
                 .hour
                 .parse::<u8>()
@@ -262,7 +275,7 @@ pub(super) fn normalize_forecast(
                 .celsius
                 .parse::<i16>()
                 .with_context(|| format!("invalid temperature in forecast {}", root.id))?;
-            temperature_values.push((day.date.clone(), hour, celsius));
+            temperature_values.push((date.clone(), hour, celsius));
         }
     }
     if conditions.is_empty() {
@@ -277,22 +290,41 @@ pub(super) fn normalize_forecast(
         bail!("forecast {} does not contain temperatures", root.id);
     }
 
+    let daily_forecasts =
+        join_hourly_forecasts(daily_forecasts, &conditions, temperature_values, &root.id)?;
+
+    Ok(Some(MunicipalityForecast {
+        id: root.id,
+        name: repair_iso_8859_15_mojibake(&root.name),
+        province: repair_iso_8859_15_mojibake(&root.province),
+        generated_at: root.generated_at,
+        daily_forecasts,
+    }))
+}
+
+fn join_hourly_forecasts(
+    mut daily_forecasts: BTreeMap<String, DailyForecast>,
+    conditions: &BTreeMap<(String, u8), NormalizedCondition>,
+    mut temperature_values: Vec<(String, u8, i16)>,
+    municipality_id: &str,
+) -> Result<Vec<DailyForecast>> {
     temperature_values.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
     if temperature_values
         .windows(2)
         .any(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1)
     {
-        bail!("forecast {} contains duplicate temperature hours", root.id);
+        bail!("forecast {municipality_id} contains duplicate temperature hours");
     }
 
     // Prefer exact or earlier conditions, falling forward only before the first state.
-    let mut hourly_forecasts = Vec::with_capacity(temperature_values.len());
     for (date, hour, temperature_celsius) in temperature_values {
         let key = (date.clone(), hour);
-        let condition = condition_at_or_near(&conditions, &key)
+        let condition = condition_at_or_near(conditions, &key)
             .context("forecast condition index unexpectedly became empty")?;
-        hourly_forecasts.push(HourlyForecast {
-            date,
+        let daily_forecast = daily_forecasts
+            .get_mut(&date)
+            .context("forecast day index unexpectedly became incomplete")?;
+        daily_forecast.hourly_forecasts.push(HourlyForecast {
             hour,
             temperature_celsius,
             condition: condition.condition,
@@ -300,13 +332,41 @@ pub(super) fn normalize_forecast(
         });
     }
 
-    Ok(Some(MunicipalityForecast {
-        id: root.id,
-        name: repair_iso_8859_15_mojibake(&root.name),
-        province: repair_iso_8859_15_mojibake(&root.province),
-        generated_at: root.generated_at,
-        hourly_forecasts,
-    }))
+    Ok(daily_forecasts
+        .into_values()
+        .filter(|forecast| !forecast.hourly_forecasts.is_empty())
+        .collect())
+}
+
+fn insert_daily_forecast(
+    daily_forecasts: &mut BTreeMap<String, DailyForecast>,
+    municipality_id: &str,
+    date: &str,
+    sunrise: String,
+    sunset: String,
+) -> Result<()> {
+    validate_date(date)?;
+    validate_solar_time(&sunrise)
+        .with_context(|| format!("invalid sunrise time in forecast {municipality_id}"))?;
+    validate_solar_time(&sunset)
+        .with_context(|| format!("invalid sunset time in forecast {municipality_id}"))?;
+    if sunrise >= sunset {
+        bail!("sunrise is not before sunset in forecast {municipality_id}");
+    }
+
+    let daily_forecast = DailyForecast {
+        date: date.to_owned(),
+        sunrise,
+        sunset,
+        hourly_forecasts: Vec::new(),
+    };
+    if daily_forecasts
+        .insert(date.to_owned(), daily_forecast)
+        .is_some()
+    {
+        bail!("forecast {municipality_id} contains duplicate days");
+    }
+    Ok(())
 }
 
 fn condition_at_or_near<'a>(
@@ -374,6 +434,24 @@ fn validate_date(date: &str) -> Result<()> {
         bail!("invalid forecast date: {date}");
     }
 
+    Ok(())
+}
+
+fn validate_solar_time(time: &str) -> Result<()> {
+    let valid_shape = time.len() == 5 && time.is_ascii() && time.as_bytes().get(2) == Some(&b':');
+    if !valid_shape {
+        bail!("invalid solar time: {time}");
+    }
+
+    let hour = time[0..2]
+        .parse::<u8>()
+        .with_context(|| format!("invalid solar time: {time}"))?;
+    let minute = time[3..5]
+        .parse::<u8>()
+        .with_context(|| format!("invalid solar time: {time}"))?;
+    if hour > 23 || minute > 59 {
+        bail!("invalid solar time: {time}");
+    }
     Ok(())
 }
 

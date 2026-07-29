@@ -16,13 +16,21 @@ pub(crate) struct MunicipalityForecast {
     pub(crate) name: String,
     pub(crate) province: String,
     pub(crate) generated_at: String,
+    pub(crate) daily_forecasts: Vec<DailyForecast>,
+}
+
+/// Solar times and hourly conditions for one local forecast day.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DailyForecast {
+    pub(crate) date: String,
+    pub(crate) sunrise: String,
+    pub(crate) sunset: String,
     pub(crate) hourly_forecasts: Vec<HourlyForecast>,
 }
 
 /// Conditions and temperature for one local forecast hour.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HourlyForecast {
-    pub(crate) date: String,
     pub(crate) hour: u8,
     pub(crate) temperature_celsius: i16,
     pub(crate) condition: WeatherCondition,

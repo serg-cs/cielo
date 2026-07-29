@@ -10,7 +10,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::aemet::{
-    AemetClient, AemetWeatherData, HourlyForecast, MunicipalityForecast, WeatherCondition,
+    AemetClient, AemetWeatherData, DailyForecast, MunicipalityForecast, WeatherCondition,
     validate_municipality_id,
 };
 
@@ -60,6 +60,8 @@ struct CatalogMunicipalityDocument<'a> {
 #[derive(Debug, Serialize)]
 struct ForecastDayDocument<'a> {
     date: &'a str,
+    sunrise: &'a str,
+    sunset: &'a str,
     hours: Vec<ForecastHourDocument<'a>>,
 }
 
@@ -204,10 +206,7 @@ pub(super) fn write_weather_data_files(
         bundles
             .entry(forecast_bundle_path(&forecast.id)?)
             .or_default()
-            .insert(
-                &forecast.id,
-                group_forecast_days(&forecast.hourly_forecasts),
-            );
+            .insert(&forecast.id, forecast_days(&forecast.daily_forecasts));
     }
 
     let forecast_bundle_files = bundles.len();
@@ -248,23 +247,23 @@ fn group_municipalities_by_province(
         .collect())
 }
 
-fn group_forecast_days(hourly_forecasts: &[HourlyForecast]) -> Vec<ForecastDayDocument<'_>> {
-    let mut days = BTreeMap::<&str, Vec<ForecastHourDocument>>::new();
-    for forecast in hourly_forecasts {
-        days.entry(&forecast.date)
-            .or_default()
-            .push(ForecastHourDocument {
-                hour: forecast.hour,
-                temp_c: forecast.temperature_celsius,
-                state: forecast.condition,
-                desc: &forecast.description,
-            });
-    }
-
-    days.into_iter()
-        .map(|(date, mut hours)| {
-            hours.sort_by_key(|forecast| forecast.hour);
-            ForecastDayDocument { date, hours }
+fn forecast_days(daily_forecasts: &[DailyForecast]) -> Vec<ForecastDayDocument<'_>> {
+    daily_forecasts
+        .iter()
+        .map(|daily_forecast| ForecastDayDocument {
+            date: &daily_forecast.date,
+            sunrise: &daily_forecast.sunrise,
+            sunset: &daily_forecast.sunset,
+            hours: daily_forecast
+                .hourly_forecasts
+                .iter()
+                .map(|forecast| ForecastHourDocument {
+                    hour: forecast.hour,
+                    temp_c: forecast.temperature_celsius,
+                    state: forecast.condition,
+                    desc: &forecast.description,
+                })
+                .collect(),
         })
         .collect()
 }

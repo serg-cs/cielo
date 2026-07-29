@@ -42,6 +42,8 @@ fn parses_and_orders_forecast_temperatures() {
                     "dia": [
                         {
                             "fecha": "2026-07-20",
+                            "orto": "06:55",
+                            "ocaso": "21:42",
                             "estado_cielo": [{
                                 "periodo": "00",
                                 "valor": "24",
@@ -51,6 +53,8 @@ fn parses_and_orders_forecast_temperatures() {
                         },
                         {
                             "fecha": "2026-07-19",
+                            "orto": "06:54",
+                            "ocaso": "21:43",
                             "estado_cielo": [
                                 {"periodo": "11", "valor": "11n", "descripcion": "Despejado"},
                                 {"periodo": "09", "valor": "14", "descripcion": "Nuboso"},
@@ -71,28 +75,37 @@ fn parses_and_orders_forecast_temperatures() {
 
     assert_eq!(forecasts.len(), 1);
     assert_eq!(
-        forecasts[0].hourly_forecasts,
+        forecasts[0].daily_forecasts,
         vec![
-            HourlyForecast {
+            DailyForecast {
                 date: "2026-07-19".to_owned(),
-                hour: 10,
-                temperature_celsius: 27,
-                condition: WeatherCondition::CloudSun,
-                description: "Intervalos nubosos".to_owned(),
+                sunrise: "06:54".to_owned(),
+                sunset: "21:43".to_owned(),
+                hourly_forecasts: vec![
+                    HourlyForecast {
+                        hour: 10,
+                        temperature_celsius: 27,
+                        condition: WeatherCondition::CloudSun,
+                        description: "Intervalos nubosos".to_owned(),
+                    },
+                    HourlyForecast {
+                        hour: 11,
+                        temperature_celsius: 29,
+                        condition: WeatherCondition::Moon,
+                        description: "Despejado".to_owned(),
+                    },
+                ],
             },
-            HourlyForecast {
-                date: "2026-07-19".to_owned(),
-                hour: 11,
-                temperature_celsius: 29,
-                condition: WeatherCondition::Moon,
-                description: "Despejado".to_owned(),
-            },
-            HourlyForecast {
+            DailyForecast {
                 date: "2026-07-20".to_owned(),
-                hour: 0,
-                temperature_celsius: 21,
-                condition: WeatherCondition::CloudDrizzle,
-                description: "Lluvia débil".to_owned(),
+                sunrise: "06:55".to_owned(),
+                sunset: "21:42".to_owned(),
+                hourly_forecasts: vec![HourlyForecast {
+                    hour: 0,
+                    temperature_celsius: 21,
+                    condition: WeatherCondition::CloudDrizzle,
+                    description: "Lluvia débil".to_owned(),
+                }],
             },
         ]
     );
@@ -111,6 +124,8 @@ fn normalizes_scalar_sky_state_shape() {
                 "prediccion": {
                     "dia": [{
                         "fecha": "2026-07-19",
+                        "orto": "06:54",
+                        "ocaso": "21:43",
                         "estado_cielo": {
                             "periodo": "10",
                             "valor": "11",
@@ -127,15 +142,63 @@ fn normalizes_scalar_sky_state_shape() {
 
     assert_eq!(forecasts.len(), 1);
     assert_eq!(
-        forecasts[0].hourly_forecasts,
-        vec![HourlyForecast {
+        forecasts[0].daily_forecasts,
+        vec![DailyForecast {
             date: "2026-07-19".to_owned(),
-            hour: 10,
-            temperature_celsius: 27,
-            condition: WeatherCondition::Sun,
-            description: "Despejado".to_owned(),
+            sunrise: "06:54".to_owned(),
+            sunset: "21:43".to_owned(),
+            hourly_forecasts: vec![HourlyForecast {
+                hour: 10,
+                temperature_celsius: 27,
+                condition: WeatherCondition::Sun,
+                description: "Despejado".to_owned(),
+            }],
         }]
     );
+}
+
+#[test]
+fn rejects_invalid_solar_times() {
+    for (sunrise, sunset) in [("6:54", "21:43"), ("06:60", "21:43"), ("21:43", "06:54")] {
+        assert!(
+            normalize_single_day_with_solar_times(
+                &serde_json::json!({"periodo": "10", "valor": "27"}),
+                &serde_json::json!({
+                    "periodo": "10",
+                    "valor": "11",
+                    "descripcion": "Despejado"
+                }),
+                sunrise,
+                sunset,
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn requires_solar_times() {
+    let document = serde_json::from_value::<ForecastDocument>(serde_json::json!({
+        "root": {
+            "id": "28079",
+            "elaborado": "2026-07-19T08:00:00",
+            "nombre": "Madrid",
+            "provincia": "Madrid",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-19",
+                    "estado_cielo": {
+                        "periodo": "10",
+                        "valor": "11",
+                        "descripcion": "Despejado"
+                    },
+                    "temperatura": {"periodo": "10", "valor": "27"}
+                }]
+            }
+        }
+    }));
+
+    assert!(document.is_err());
 }
 
 #[test]
@@ -231,11 +294,11 @@ fn prolongs_latest_earlier_condition_for_missing_hour() {
     .expect("forecast should remain included");
 
     assert_eq!(
-        forecast.hourly_forecasts[0].condition,
+        forecast.daily_forecasts[0].hourly_forecasts[0].condition,
         WeatherCondition::CloudSun
     );
     assert_eq!(
-        forecast.hourly_forecasts[0].description,
+        forecast.daily_forecasts[0].hourly_forecasts[0].description,
         "Intervalos nubosos"
     );
 }
@@ -253,10 +316,13 @@ fn uses_closest_later_condition_before_first_available_state() {
     .expect("forecast should remain included");
 
     assert_eq!(
-        forecast.hourly_forecasts[0].condition,
+        forecast.daily_forecasts[0].hourly_forecasts[0].condition,
         WeatherCondition::Sun
     );
-    assert_eq!(forecast.hourly_forecasts[0].description, "Despejado");
+    assert_eq!(
+        forecast.daily_forecasts[0].hourly_forecasts[0].description,
+        "Despejado"
+    );
 }
 
 #[test]
@@ -283,6 +349,8 @@ fn rejects_archive_when_every_municipality_lacks_conditions() {
                 "prediccion": {
                     "dia": [{
                         "fecha": "2026-07-22",
+                        "orto": "07:02",
+                        "ocaso": "21:36",
                         "temperatura": {"periodo": "09", "valor": "18"}
                     }]
                 }
@@ -311,6 +379,8 @@ fn archive_excludes_conditionless_municipality_but_keeps_usable_forecasts() {
             "prediccion": {
                 "dia": [{
                     "fecha": "2026-07-22",
+                    "orto": "07:02",
+                    "ocaso": "21:36",
                     "temperatura": {"periodo": "09", "valor": "18"}
                 }]
             }
@@ -325,6 +395,8 @@ fn archive_excludes_conditionless_municipality_but_keeps_usable_forecasts() {
             "prediccion": {
                 "dia": [{
                     "fecha": "2026-07-22",
+                    "orto": "07:02",
+                    "ocaso": "21:36",
                     "estado_cielo": [{
                         "periodo": "09",
                         "valor": "11",
@@ -431,6 +503,8 @@ fn rejects_forecast_filename_id_mismatch() {
                 "prediccion": {
                     "dia": [{
                         "fecha": "2026-07-19",
+                        "orto": "06:54",
+                        "ocaso": "21:43",
                         "temperatura": {"periodo": "10", "valor": "27"}
                     }]
                 }
@@ -742,6 +816,15 @@ fn normalize_single_day(
     temperatures: &serde_json::Value,
     sky_states: &serde_json::Value,
 ) -> Result<Option<MunicipalityForecast>> {
+    normalize_single_day_with_solar_times(temperatures, sky_states, "06:54", "21:43")
+}
+
+fn normalize_single_day_with_solar_times(
+    temperatures: &serde_json::Value,
+    sky_states: &serde_json::Value,
+    sunrise: &str,
+    sunset: &str,
+) -> Result<Option<MunicipalityForecast>> {
     let document = serde_json::from_value::<ForecastDocument>(serde_json::json!({
         "root": {
             "id": "28079",
@@ -751,6 +834,8 @@ fn normalize_single_day(
             "prediccion": {
                 "dia": [{
                     "fecha": "2026-07-19",
+                    "orto": sunrise,
+                    "ocaso": sunset,
                     "estado_cielo": sky_states,
                     "temperatura": temperatures
                 }]
