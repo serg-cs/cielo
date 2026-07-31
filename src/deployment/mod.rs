@@ -24,6 +24,7 @@ const DATA_ENTRY_POINT: &str = "catalog.json";
 const CONTENT_HASH_LENGTH: usize = 16;
 const LEGACY_CONTENT_HASH_LENGTH: usize = 64;
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+const REVALIDATE_CACHE_CONTROL: &str = "no-cache, must-revalidate";
 
 /// Select validation and ordering rules for a deployment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,7 +189,7 @@ fn prepare_deployment(input: &Path, kind: DeploymentKind) -> Result<Vec<Deployme
                 .first_or_octet_stream()
                 .essence_str()
                 .to_owned();
-            let cache_control = cache_control(&key);
+            let cache_control = cache_control(&key, kind);
             files.push(DeploymentFile {
                 source: path,
                 key,
@@ -247,8 +248,12 @@ fn object_key(relative: &Path) -> Result<String> {
     Ok(components.join("/"))
 }
 
-fn cache_control(key: &str) -> Option<&'static str> {
-    is_content_hashed_key(key).then_some(IMMUTABLE_CACHE_CONTROL)
+fn cache_control(key: &str, kind: DeploymentKind) -> Option<&'static str> {
+    if is_content_hashed_key(key) {
+        return Some(IMMUTABLE_CACHE_CONTROL);
+    }
+
+    (kind == DeploymentKind::App && key == APP_ENTRY_POINT).then_some(REVALIDATE_CACHE_CONTROL)
 }
 
 fn is_content_hashed_key(key: &str) -> bool {

@@ -18,8 +18,8 @@ use aws_sdk_s3::{
 use crate::cli::{DEFAULT_DEPLOY_CONCURRENCY, DeployTargetArgs};
 
 use super::{
-    DeploymentKind, IMMUTABLE_CACHE_CONTROL, create_service_config, prepare_deployment,
-    run_bounded_uploads, upload_files,
+    DeploymentKind, IMMUTABLE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, create_service_config,
+    prepare_deployment, run_bounded_uploads, upload_files,
 };
 
 #[test]
@@ -59,10 +59,11 @@ fn prepares_data_deployment_with_catalog_last() {
     assert_eq!(files[0].content_type, "application/octet-stream");
     assert_eq!(files[1].key, "catalog.json");
     assert_eq!(files[1].content_type, "application/json");
+    assert_eq!(files[1].cache_control, None);
 }
 
 #[test]
-fn assigns_immutable_caching_only_to_content_hashed_files() {
+fn assigns_cache_policies_by_app_file_role() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let input = temporary_root.path().join("application");
     fs::create_dir(&input).expect("app directory should be created");
@@ -90,16 +91,25 @@ fn assigns_immutable_caching_only_to_content_hashed_files() {
         .iter()
         .find(|file| file.key == legacy_hashed_key)
         .expect("legacy hashed script should be prepared");
+    let index = files
+        .iter()
+        .find(|file| file.key == "index.html")
+        .expect("index should be prepared");
 
     assert_eq!(hashed_file.cache_control, Some(IMMUTABLE_CACHE_CONTROL));
     assert_eq!(
         legacy_hashed_file.cache_control,
         Some(IMMUTABLE_CACHE_CONTROL)
     );
+    assert_eq!(index.cache_control, Some(REVALIDATE_CACHE_CONTROL));
     assert!(
         files
             .iter()
-            .filter(|file| { file.key != hashed_file.key && file.key != legacy_hashed_file.key })
+            .filter(|file| {
+                file.key != hashed_file.key
+                    && file.key != legacy_hashed_file.key
+                    && file.key != index.key
+            })
             .all(|file| file.cache_control.is_none())
     );
 }
@@ -197,7 +207,7 @@ async fn uploads_the_same_key_with_content_type_on_each_deployment() {
 }
 
 #[tokio::test]
-async fn uploads_content_hashed_files_with_immutable_caching() {
+async fn uploads_app_files_with_role_appropriate_caching() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let input = temporary_root.path().join("application");
     fs::create_dir(&input).expect("app directory should be created");
@@ -219,7 +229,7 @@ async fn uploads_content_hashed_files_with_immutable_caching() {
         .await;
     let index = server
         .mock("PUT", "/application/index.html?x-id=PutObject")
-        .match_header("cache-control", mockito::Matcher::Missing)
+        .match_header("cache-control", REVALIDATE_CACHE_CONTROL)
         .with_status(200)
         .create_async()
         .await;
