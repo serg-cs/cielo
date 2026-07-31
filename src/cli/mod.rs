@@ -5,6 +5,8 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(test)]
 mod tests;
 
+pub(crate) const DEFAULT_DEPLOY_CONCURRENCY: u16 = 16;
+
 /// Build and deploy a static weather app and its AEMET data.
 #[derive(Debug, Parser)]
 #[command(name = "cielo", version, about)]
@@ -87,6 +89,15 @@ pub struct DeployTargetArgs {
     /// Destination S3 bucket.
     #[arg(short, long, value_name = "NAME")]
     pub bucket: String,
+
+    /// Maximum number of object uploads in progress.
+    #[arg(
+        long,
+        value_name = "COUNT",
+        default_value_t = DEFAULT_DEPLOY_CONCURRENCY,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
+    pub concurrency: u16,
 
     /// S3-compatible endpoint override.
     #[arg(long, value_name = "URL")]

@@ -67,7 +67,8 @@ Built directories can be uploaded directly to an S3-compatible bucket.
 
 Credentials are read from environment variables `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY`. Custom endpoints and regions can be specified with
-`--endpoint` and `--region`.
+`--endpoint` and `--region`. Deployments upload up to 16 objects concurrently
+by default; use `--concurrency` to select a different positive limit.
 
 ```sh
 cielo deploy app --input dist/app --bucket cielo-app --region auto

@@ -1,4 +1,11 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -8,11 +15,11 @@ use aws_sdk_s3::{
     config::{BehaviorVersion, Credentials, Region, SharedCredentialsProvider, retry::RetryConfig},
 };
 
-use crate::cli::DeployTargetArgs;
+use crate::cli::{DEFAULT_DEPLOY_CONCURRENCY, DeployTargetArgs};
 
 use super::{
     DeploymentKind, IMMUTABLE_CACHE_CONTROL, create_service_config, prepare_deployment,
-    upload_files,
+    run_bounded_uploads, upload_files,
 };
 
 #[test]
@@ -169,12 +176,22 @@ async fn uploads_the_same_key_with_content_type_on_each_deployment() {
         .await;
     let client = test_client(&server.url());
 
-    upload_files(&client, "weather-data", &files)
-        .await
-        .expect("first deployment should upload");
-    upload_files(&client, "weather-data", &files)
-        .await
-        .expect("second deployment should overwrite the same key");
+    upload_files(
+        &client,
+        "weather-data",
+        &files,
+        usize::from(DEFAULT_DEPLOY_CONCURRENCY),
+    )
+    .await
+    .expect("first deployment should upload");
+    upload_files(
+        &client,
+        "weather-data",
+        &files,
+        usize::from(DEFAULT_DEPLOY_CONCURRENCY),
+    )
+    .await
+    .expect("second deployment should overwrite the same key");
 
     upload.assert_async().await;
 }
@@ -208,9 +225,14 @@ async fn uploads_content_hashed_files_with_immutable_caching() {
         .await;
     let client = test_client(&server.url());
 
-    upload_files(&client, "application", &files)
-        .await
-        .expect("application files should upload");
+    upload_files(
+        &client,
+        "application",
+        &files,
+        usize::from(DEFAULT_DEPLOY_CONCURRENCY),
+    )
+    .await
+    .expect("application files should upload");
 
     asset.assert_async().await;
     index.assert_async().await;
@@ -228,10 +250,7 @@ async fn stops_before_uploading_index_when_an_asset_fails() {
     let mut server = mockito::Server::new_async().await;
     let bucket = "private-application-bucket";
     let asset = server
-        .mock(
-            "PUT",
-            format!("/{bucket}/app.js?x-id=PutObject").as_str(),
-        )
+        .mock("PUT", format!("/{bucket}/app.js?x-id=PutObject").as_str())
         .with_status(400)
         .with_body("<Error><Code>InvalidRequest</Code></Error>")
         .create_async()
@@ -248,9 +267,14 @@ async fn stops_before_uploading_index_when_an_asset_fails() {
     let endpoint = server.url();
     let client = test_client(&endpoint);
 
-    let error = upload_files(&client, bucket, &files)
-        .await
-        .expect_err("failed asset should stop deployment");
+    let error = upload_files(
+        &client,
+        bucket,
+        &files,
+        usize::from(DEFAULT_DEPLOY_CONCURRENCY),
+    )
+    .await
+    .expect_err("failed asset should stop deployment");
 
     let message = format!("{error:#}");
     assert!(message.contains("failed to upload app.js"));
@@ -258,6 +282,56 @@ async fn stops_before_uploading_index_when_an_asset_fails() {
     assert!(!message.contains(&endpoint));
     asset.assert_async().await;
     index.assert_async().await;
+}
+
+#[tokio::test]
+async fn bounds_the_number_of_uploads_in_progress() {
+    for concurrency in [1, 3] {
+        let in_progress = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let operation_in_progress = Arc::clone(&in_progress);
+        let operation_maximum = Arc::clone(&maximum);
+
+        run_bounded_uploads(0..8, concurrency, move |_| {
+            let in_progress = Arc::clone(&operation_in_progress);
+            let maximum = Arc::clone(&operation_maximum);
+            async move {
+                let current = in_progress.fetch_add(1, Ordering::SeqCst) + 1;
+                maximum.fetch_max(current, Ordering::SeqCst);
+                tokio::task::yield_now().await;
+                in_progress.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+        })
+        .await
+        .expect("bounded uploads should finish");
+
+        assert_eq!(maximum.load(Ordering::SeqCst), concurrency);
+        assert_eq!(in_progress.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn stops_scheduling_uploads_after_a_failure() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let operation_started = Arc::clone(&started);
+
+    let error = run_bounded_uploads(0..4, 1, move |item| {
+        let started = Arc::clone(&operation_started);
+        async move {
+            started.fetch_add(1, Ordering::SeqCst);
+            if item == 0 {
+                anyhow::bail!("expected upload failure");
+            }
+
+            Ok(())
+        }
+    })
+    .await
+    .expect_err("the first upload should fail");
+
+    assert!(error.to_string().contains("expected upload failure"));
+    assert_eq!(started.load(Ordering::SeqCst), 1);
 }
 
 fn test_client(endpoint: &str) -> Client {
@@ -276,6 +350,7 @@ fn test_client(endpoint: &str) -> Client {
     let args = DeployTargetArgs {
         input: PathBuf::new(),
         bucket: "test".to_owned(),
+        concurrency: DEFAULT_DEPLOY_CONCURRENCY,
         endpoint: Some(endpoint.to_owned()),
         region: None,
         path_style: true,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use super::{BuildTarget, Cli, Command, DeployTarget};
+use super::{BuildTarget, Cli, Command, DEFAULT_DEPLOY_CONCURRENCY, DeployTarget};
 
 #[test]
 fn parses_build_app_command() {
@@ -71,6 +71,7 @@ fn parses_deploy_app_command_with_r2_options() {
         Some("https://account.r2.cloudflarestorage.com")
     );
     assert_eq!(args.region.as_deref(), Some("auto"));
+    assert_eq!(args.concurrency, DEFAULT_DEPLOY_CONCURRENCY);
     assert!(!args.path_style);
 }
 
@@ -84,6 +85,8 @@ fn parses_deploy_data_command_with_standard_aws_configuration() {
         "dist/weather-data",
         "-b",
         "weather-data",
+        "--concurrency",
+        "4",
     ])
     .expect("deploy data arguments should parse");
 
@@ -97,7 +100,26 @@ fn parses_deploy_data_command_with_standard_aws_configuration() {
     assert_eq!(args.bucket, "weather-data");
     assert_eq!(args.endpoint, None);
     assert_eq!(args.region, None);
+    assert_eq!(args.concurrency, 4);
     assert!(!args.path_style);
+}
+
+#[test]
+fn rejects_zero_deploy_concurrency() {
+    let error = Cli::try_parse_from([
+        "cielo",
+        "deploy",
+        "data",
+        "--input",
+        "dist/weather-data",
+        "--bucket",
+        "weather-data",
+        "--concurrency",
+        "0",
+    ])
+    .expect_err("zero deployment concurrency should be rejected");
+
+    assert!(error.to_string().contains("--concurrency"));
 }
 
 #[test]

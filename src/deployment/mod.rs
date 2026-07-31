@@ -1,5 +1,6 @@
 use std::{
     fs,
+    future::Future,
     path::{Component, Path, PathBuf},
 };
 
@@ -10,6 +11,7 @@ use aws_sdk_s3::{
     config::{Builder as S3ConfigBuilder, Region},
     primitives::ByteStream,
 };
+use tokio::task::JoinSet;
 
 use crate::cli::DeployTargetArgs;
 
@@ -46,7 +48,7 @@ pub(crate) struct DeploymentSummary {
     pub(crate) bytes: u64,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DeploymentFile {
     source: PathBuf,
     key: String,
@@ -72,7 +74,7 @@ pub(crate) async fn deploy_directory(
 
     // Reuse the standard AWS provider chain while allowing S3-compatible endpoints.
     let client = create_client(args).await;
-    upload_files(&client, &args.bucket, &files).await?;
+    upload_files(&client, &args.bucket, &files, usize::from(args.concurrency)).await?;
 
     Ok(DeploymentSummary {
         files: files.len(),
@@ -83,6 +85,9 @@ pub(crate) async fn deploy_directory(
 fn validate_connection_options(args: &DeployTargetArgs) -> Result<()> {
     if args.bucket.trim().is_empty() {
         bail!("bucket name must not be empty");
+    }
+    if args.concurrency == 0 {
+        bail!("deployment concurrency must be greater than zero");
     }
     if args
         .endpoint
@@ -263,25 +268,88 @@ fn is_content_hashed_key(key: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
-async fn upload_files(client: &Client, bucket: &str, files: &[DeploymentFile]) -> Result<()> {
-    for file in files {
-        let body = ByteStream::from_path(&file.source)
-            .await
-            .with_context(|| format!("failed to open input file {}", file.source.display()))?;
-        let mut upload = client
-            .put_object()
-            .bucket(bucket)
-            .key(&file.key)
-            .content_type(&file.content_type)
-            .body(body);
-        if let Some(cache_control) = file.cache_control {
-            upload = upload.cache_control(cache_control);
-        }
-        upload
-            .send()
-            .await
-            .map_err(|_| anyhow!("failed to upload {}", file.key))?;
+async fn upload_files(
+    client: &Client,
+    bucket: &str,
+    files: &[DeploymentFile],
+    concurrency: usize,
+) -> Result<()> {
+    if concurrency == 0 {
+        bail!("deployment concurrency must be greater than zero");
     }
+    let (entry_point, assets) = files
+        .split_last()
+        .context("deployment contains no files to upload")?;
+
+    // Finish every supporting object before publishing the consumer entry point.
+    let upload_client = client.clone();
+    let upload_bucket = bucket.to_owned();
+    run_bounded_uploads(assets.iter().cloned(), concurrency, move |file| {
+        let client = upload_client.clone();
+        let bucket = upload_bucket.clone();
+        async move { upload_file(&client, &bucket, &file).await }
+    })
+    .await?;
+    upload_file(client, bucket, entry_point).await
+}
+
+async fn run_bounded_uploads<T, I, F, Fut>(items: I, concurrency: usize, upload: F) -> Result<()>
+where
+    T: Send + 'static,
+    I: IntoIterator<Item = T>,
+    F: Fn(T) -> Fut,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    if concurrency == 0 {
+        bail!("deployment concurrency must be greater than zero");
+    }
+
+    // Fill the initial window, then replenish it as uploads finish.
+    let mut items = items.into_iter();
+    let mut uploads = JoinSet::new();
+    for item in items.by_ref().take(concurrency) {
+        uploads.spawn(upload(item));
+    }
+
+    let mut first_error = None;
+    while let Some(joined) = uploads.join_next().await {
+        let result = match joined {
+            Ok(result) => result,
+            Err(_) => Err(anyhow!("file upload task failed")),
+        };
+        if let Err(error) = result {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+            continue;
+        }
+        if first_error.is_none()
+            && let Some(item) = items.next()
+        {
+            uploads.spawn(upload(item));
+        }
+    }
+
+    first_error.map_or(Ok(()), Err)
+}
+
+async fn upload_file(client: &Client, bucket: &str, file: &DeploymentFile) -> Result<()> {
+    let body = ByteStream::from_path(&file.source)
+        .await
+        .with_context(|| format!("failed to open input file {}", file.source.display()))?;
+    let mut upload = client
+        .put_object()
+        .bucket(bucket)
+        .key(&file.key)
+        .content_type(&file.content_type)
+        .body(body);
+    if let Some(cache_control) = file.cache_control {
+        upload = upload.cache_control(cache_control);
+    }
+    upload
+        .send()
+        .await
+        .map_err(|_| anyhow!("failed to upload {}", file.key))?;
 
     Ok(())
 }
