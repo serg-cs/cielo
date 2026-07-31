@@ -4,6 +4,7 @@ import {
 } from "./weather-data-client.js";
 
 const hourlyForecastPeriodCount = 24;
+const dailyForecastPeriodCount = 7;
 const refreshIntervalMilliseconds = 30 * 60 * 1_000;
 const hourMilliseconds = 60 * 60 * 1_000;
 const minuteMilliseconds = 60 * 1_000;
@@ -42,6 +43,20 @@ const supportedConditions = new Set([
  * @typedef {object} DailySummary
  * @property {number} minimumTemperatureCelsius
  * @property {number} maximumTemperatureCelsius
+ *
+ * @property {string | null} condition
+ * @property {string | null} description
+ */
+
+/**
+ * @typedef {object} DailyForecastPeriod
+ * @property {string} date
+ * @property {boolean} isToday
+ * @property {number | null} minimumTemperatureCelsius
+ * @property {number | null} maximumTemperatureCelsius
+ *
+ * @property {string | null} condition
+ * @property {string | null} description
  */
 
 /**
@@ -150,6 +165,8 @@ function validateForecastDocument(document, municipalityId) {
     dailySummariesByDate.set(day.date, {
       minimumTemperatureCelsius: day.summary.temp_min_c,
       maximumTemperatureCelsius: day.summary.temp_max_c,
+      condition: day.summary.state,
+      description: day.summary.desc,
     });
     eventsByDate.set(day.date, day.events);
 
@@ -217,6 +234,55 @@ export function selectCurrentDaySummary(forecast, now = new Date()) {
 /**
  * @param {ForecastTimeline} forecast
  * @param {Date} [now]
+ * @returns {DailyForecastPeriod[]}
+ */
+export function selectDailyForecastPeriods(forecast, now = new Date()) {
+  return dailyForecastPeriodsFor(
+    forecast.timeZone,
+    forecast.dailySummariesByDate,
+    now,
+  );
+}
+
+function dailyForecastPeriodsFor(timeZone, dailySummariesByDate, now) {
+  const { date: currentDate } = forecastTime(now, timeZone);
+
+  // Preserve interior gaps while removing unsupported dates from the end.
+  const candidates = Array.from(
+    { length: dailyForecastPeriodCount },
+    (_, index) => {
+      const date = addForecastDays(currentDate, index);
+      return {
+        date,
+        index,
+        summary: dailySummariesByDate.get(date),
+      };
+    },
+  );
+  while (
+    candidates.length > 0 &&
+    candidates[candidates.length - 1]?.summary === undefined
+  ) {
+    candidates.pop();
+  }
+
+  return candidates.map(({ date, index, summary }) => {
+    return {
+      date,
+      isToday: index === 0,
+      minimumTemperatureCelsius:
+        summary?.minimumTemperatureCelsius ?? null,
+      maximumTemperatureCelsius:
+        summary?.maximumTemperatureCelsius ?? null,
+      condition: summary?.condition ?? null,
+      description: summary?.description ?? null,
+    };
+  });
+}
+
+/**
+ * @param {ForecastTimeline} forecast
+ * @param {Date} [now]
  * @returns {HourlyTimelinePeriod[]}
  */
 export function selectHourlyForecastPeriods(forecast, now = new Date()) {
@@ -270,12 +336,20 @@ export function selectHourlyForecastPeriods(forecast, now = new Date()) {
 /**
  * @param {CurrentConditions | null} currentConditions
  * @param {HourlyTimelinePeriod[]} hourlyForecastPeriods
+ * @param {DailyForecastPeriod[]} dailyForecastPeriods
  * @returns {boolean}
  */
-function forecastPeriodsAreUsable(currentConditions, hourlyForecastPeriods) {
+function forecastPeriodsAreUsable(
+  currentConditions,
+  hourlyForecastPeriods,
+  dailyForecastPeriods,
+) {
   return currentConditions !== null ||
     hourlyForecastPeriods.some(
       (period) => period.kind === "forecast" && period.forecast !== null,
+    ) ||
+    dailyForecastPeriods.some(
+      (period) => period.minimumTemperatureCelsius !== null,
     );
 }
 
@@ -285,6 +359,7 @@ export class ForecastStore extends EventTarget {
   #forecasts = new Map();
   #currentConditionsById = new Map();
   #dailySummariesById = new Map();
+  #dailyForecastPeriodsById = new Map();
   #hourlyForecastPeriodsById = new Map();
   #forecastStatuses = new Map();
   #cacheReads = new Map();
@@ -369,6 +444,7 @@ export class ForecastStore extends EventTarget {
         this.#forecastStatuses.delete(id);
         this.#publishCurrentConditions(id, null);
         this.#publishDailySummary(id, null);
+        this.#publishDailyForecastPeriods(id, []);
         this.#publishHourlyForecastPeriods(id, []);
       }
     }
@@ -394,6 +470,23 @@ export class ForecastStore extends EventTarget {
   /** @param {string} municipalityId @returns {DailySummary | null} */
   getCurrentDaySummary(municipalityId) {
     return this.#dailySummariesById.get(municipalityId) ?? null;
+  }
+
+  /** @param {string} municipalityId @returns {DailyForecastPeriod[]} */
+  getDailyForecastPeriods(municipalityId) {
+    const forecast = this.#forecasts.get(municipalityId);
+    if (forecast !== undefined) {
+      return selectDailyForecastPeriods(forecast, this.#now());
+    }
+
+    const municipality = this.#catalogById.get(municipalityId);
+    return municipality === undefined
+      ? []
+      : dailyForecastPeriodsFor(
+        municipality.timeZone,
+        new Map(),
+        this.#now(),
+      );
   }
 
   /** @param {string} municipalityId @returns {HourlyTimelinePeriod[]} */
@@ -519,7 +612,7 @@ export class ForecastStore extends EventTarget {
       throw new Error("El lote no contiene la previsión solicitada");
     }
     if (!this.#storeForecast(municipality.id, forecast)) {
-      throw new Error("La previsión no contiene horas vigentes");
+      throw new Error("La previsión no contiene datos vigentes");
     }
   }
 
@@ -586,12 +679,17 @@ export class ForecastStore extends EventTarget {
     const now = this.#now();
     const currentConditions = selectCurrentConditions(forecast, now);
     const dailySummary = selectCurrentDaySummary(forecast, now);
+    const dailyForecastPeriods = selectDailyForecastPeriods(forecast, now);
     const hourlyForecastPeriods = selectHourlyForecastPeriods(forecast, now);
     this.#publishCurrentConditions(
       municipalityId,
       currentConditions,
     );
     this.#publishDailySummary(municipalityId, dailySummary);
+    this.#publishDailyForecastPeriods(
+      municipalityId,
+      dailyForecastPeriods,
+    );
     this.#publishHourlyForecastPeriods(
       municipalityId,
       hourlyForecastPeriods,
@@ -601,6 +699,7 @@ export class ForecastStore extends EventTarget {
     const usable = forecastPeriodsAreUsable(
       currentConditions,
       hourlyForecastPeriods,
+      dailyForecastPeriods,
     );
     if (usable) {
       this.#publishForecastStatus(municipalityId, "ready");
@@ -612,29 +711,53 @@ export class ForecastStore extends EventTarget {
     const now = this.#now();
     for (const municipalityId of this.#savedMunicipalityIds) {
       const forecast = this.#forecasts.get(municipalityId);
-      if (forecast !== undefined) {
-        const currentConditions = selectCurrentConditions(forecast, now);
-        const dailySummary = selectCurrentDaySummary(forecast, now);
-        const hourlyForecastPeriods = selectHourlyForecastPeriods(forecast, now);
-        this.#publishCurrentConditions(
-          municipalityId,
-          currentConditions,
-        );
-        this.#publishDailySummary(municipalityId, dailySummary);
-        this.#publishHourlyForecastPeriods(
-          municipalityId,
-          hourlyForecastPeriods,
-        );
-
-        // Reconcile status in both directions as the rolling window advances.
-        if (forecastPeriodsAreUsable(currentConditions, hourlyForecastPeriods)) {
-          this.#publishForecastStatus(municipalityId, "ready");
-        } else if (this.#forecastStatuses.get(municipalityId) === "ready") {
-          this.#publishForecastStatus(
+      if (forecast === undefined) {
+        const municipality = this.#catalogById.get(municipalityId);
+        if (municipality !== undefined) {
+          this.#publishDailyForecastPeriods(
             municipalityId,
-            navigator.onLine ? "loading" : "offline",
+            dailyForecastPeriodsFor(
+              municipality.timeZone,
+              new Map(),
+              now,
+            ),
           );
         }
+        continue;
+      }
+
+      const currentConditions = selectCurrentConditions(forecast, now);
+      const dailySummary = selectCurrentDaySummary(forecast, now);
+      const dailyForecastPeriods = selectDailyForecastPeriods(forecast, now);
+      const hourlyForecastPeriods = selectHourlyForecastPeriods(forecast, now);
+      this.#publishCurrentConditions(
+        municipalityId,
+        currentConditions,
+      );
+      this.#publishDailySummary(municipalityId, dailySummary);
+      this.#publishDailyForecastPeriods(
+        municipalityId,
+        dailyForecastPeriods,
+      );
+      this.#publishHourlyForecastPeriods(
+        municipalityId,
+        hourlyForecastPeriods,
+      );
+
+      // Reconcile status in both directions as the rolling window advances.
+      if (
+        forecastPeriodsAreUsable(
+          currentConditions,
+          hourlyForecastPeriods,
+          dailyForecastPeriods,
+        )
+      ) {
+        this.#publishForecastStatus(municipalityId, "ready");
+      } else if (this.#forecastStatuses.get(municipalityId) === "ready") {
+        this.#publishForecastStatus(
+          municipalityId,
+          navigator.onLine ? "loading" : "offline",
+        );
       }
     }
   }
@@ -647,9 +770,11 @@ export class ForecastStore extends EventTarget {
     }
 
     const now = this.#now();
+    const dailyForecastPeriods = selectDailyForecastPeriods(forecast, now);
     return forecastPeriodsAreUsable(
       selectCurrentConditions(forecast, now),
       selectHourlyForecastPeriods(forecast, now),
+      dailyForecastPeriods,
     );
   }
 
@@ -695,6 +820,32 @@ export class ForecastStore extends EventTarget {
     this.dispatchEvent(
       new CustomEvent("dailysummarychange", {
         detail: { municipalityId, dailySummary },
+      }),
+    );
+  }
+
+  /**
+   * @param {string} municipalityId
+   * @param {DailyForecastPeriod[]} periods
+   */
+  #publishDailyForecastPeriods(municipalityId, periods) {
+    const previous = this.#dailyForecastPeriodsById.get(municipalityId);
+    if (
+      (previous === undefined && periods.length === 0) ||
+      previous !== undefined &&
+        dailyForecastPeriodsAreEqual(previous, periods)
+    ) {
+      return;
+    }
+
+    if (periods.length === 0) {
+      this.#dailyForecastPeriodsById.delete(municipalityId);
+    } else {
+      this.#dailyForecastPeriodsById.set(municipalityId, periods);
+    }
+    this.dispatchEvent(
+      new CustomEvent("dailyforecastchange", {
+        detail: { municipalityId, periods },
       }),
     );
   }
@@ -910,7 +1061,18 @@ function isDailySummary(value) {
     Number.isInteger(value.temp_max_c) &&
     value.temp_max_c >= temperatureMinimum &&
     value.temp_max_c <= temperatureMaximum &&
-    value.temp_min_c <= value.temp_max_c
+    value.temp_min_c <= value.temp_max_c &&
+    "state" in value &&
+    "desc" in value &&
+    (
+      value.state === null && value.desc === null ||
+      (
+        typeof value.state === "string" &&
+        supportedConditions.has(value.state) &&
+        typeof value.desc === "string" &&
+        value.desc.trim() !== ""
+      )
+    )
   );
 }
 
@@ -1025,6 +1187,19 @@ function forecastTime(instant, timeZone) {
   };
 }
 
+/** @param {string} date @param {number} dayOffset */
+function addForecastDays(date, dayOffset) {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  const shifted = new Date(Date.UTC(year, month - 1, day + dayOffset));
+  return [
+    String(shifted.getUTCFullYear()).padStart(4, "0"),
+    String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+    String(shifted.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 /** @param {string} date @param {number} hour */
 function forecastKey(date, hour) {
   return `${date}:${String(hour).padStart(2, "0")}`;
@@ -1050,9 +1225,31 @@ function dailySummariesAreEqual(left, right) {
       left !== null &&
       right !== null &&
       left.minimumTemperatureCelsius === right.minimumTemperatureCelsius &&
-      left.maximumTemperatureCelsius === right.maximumTemperatureCelsius
+      left.maximumTemperatureCelsius === right.maximumTemperatureCelsius &&
+      left.condition === right.condition &&
+      left.description === right.description
     )
   );
+}
+
+/**
+ * @param {DailyForecastPeriod[]} left
+ * @param {DailyForecastPeriod[]} right
+ */
+function dailyForecastPeriodsAreEqual(left, right) {
+  return left.length === right.length &&
+    left.every((period, index) => {
+      const other = right[index];
+      return other !== undefined &&
+        period.date === other.date &&
+        period.isToday === other.isToday &&
+        period.minimumTemperatureCelsius ===
+          other.minimumTemperatureCelsius &&
+        period.maximumTemperatureCelsius ===
+          other.maximumTemperatureCelsius &&
+        period.condition === other.condition &&
+        period.description === other.description;
+    });
 }
 
 /**

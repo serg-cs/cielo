@@ -1,4 +1,4 @@
-/* Current conditions and hourly forecast presentation. */
+/* Swipeable current and daily forecast presentation. */
   .cielo-forecast-view {
     position: absolute;
     z-index: 10;
@@ -8,8 +8,13 @@
   }
 
   .forecast-screen {
+    --forecast-bottom-lift: 0.75rem;
+    --forecast-data-inset: 1.9rem;
+
     position: fixed;
     inset: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
     overflow: hidden;
     outline: none;
     color: var(--cielo-color-text);
@@ -18,19 +23,15 @@
 
   .forecast-header {
     position: relative;
-    z-index: 2;
+    z-index: 3;
+    display: flex;
     width: 100%;
     max-width: var(--cielo-content-width);
-    min-height: 5rem;
-    padding: calc(0.8rem + env(safe-area-inset-top)) var(--cielo-space-4) 1rem;
+    min-height: var(--cielo-touch-target);
+    padding: calc(0.8rem + env(safe-area-inset-top)) var(--cielo-space-4) 0;
     margin-inline: auto;
-  }
-
-  .forecast-header-content {
-    display: flex;
     align-items: center;
     gap: 0.35rem;
-    min-height: var(--cielo-touch-target);
   }
 
   .forecast-heading {
@@ -98,14 +99,59 @@
     overflow-wrap: anywhere;
   }
 
-  .current-conditions {
+  .forecast-pages {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    outline: none;
+    outline-offset: -0.2rem;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .forecast-pages::-webkit-scrollbar {
+    display: none;
+  }
+
+  .forecast-page {
+    position: relative;
+    flex: 0 0 100%;
     width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  .forecast-page-content {
+    width: 100%;
+    max-width: var(--cielo-content-width);
+    padding-inline: var(--forecast-data-inset);
+    margin-inline: auto;
+  }
+
+  .forecast-current-summary {
+    width: 100%;
+    max-width: var(--cielo-content-width);
+    padding-bottom: 0.75rem;
+    padding-inline: var(--forecast-data-inset);
+    margin-inline: auto;
+  }
+
+  .current-conditions {
+    --current-reading-size: clamp(6rem, 30vw, 10rem);
+
+    width: 100%;
+    min-height: var(--current-reading-size);
     margin-top: 0.55rem;
   }
 
   .current-reading {
-    --current-reading-size: clamp(6rem, 30vw, 10rem);
-
     display: flex;
     align-items: center;
   }
@@ -114,12 +160,11 @@
     width: var(--current-reading-size);
     height: var(--current-reading-size);
     margin-left: auto;
-    margin-right: 0.9rem;
   }
 
   #current-temperature-value {
     flex: 0 0 auto;
-    margin-left: 0.9rem;
+    margin-left: -0.075em;
     font-size: var(--current-reading-size);
     font-variant-numeric: tabular-nums;
     font-weight: 300;
@@ -130,8 +175,8 @@
   .current-condition-description {
     display: block;
     /* Follow a two-digit reading until the desktop text cap takes over. */
-    max-width: min(18rem, 41.5vw, calc(100% - 1.8rem));
-    margin: 0.65rem 0 0 0.9rem;
+    max-width: min(18rem, 41.5vw, 100%);
+    margin: 0.65rem 0 0;
     color: var(--cielo-color-muted);
     font-size: clamp(1.05rem, 4vw, 1.2rem);
     font-weight: 350;
@@ -140,27 +185,51 @@
     overflow-wrap: anywhere;
   }
 
-  .current-daily-extrema {
+  .daily-extrema-pair {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
-    margin: 0.38rem 0 0 0.9rem;
+    justify-content: flex-end;
+    gap: var(--daily-extrema-gap, 0.75rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+  }
+
+  .current-daily-extrema {
+    --daily-extrema-gap: 0.9rem;
+
+    justify-content: flex-start;
+    margin: 0.38rem 0 0;
     color: var(--cielo-color-text);
     font-size: clamp(1.25rem, 4.5vw, 1.45rem);
-    font-variant-numeric: tabular-nums;
     font-weight: 500;
-    line-height: 1.2;
+  }
+
+  .current-daily-extrema .daily-extreme {
+    flex-basis: auto;
   }
 
   .daily-extreme {
-    display: inline-flex;
+    display: flex;
+    flex: 0 0 5.5ch;
     align-items: center;
-    gap: 0.12rem;
+    justify-content: flex-end;
+    gap: 0.08em;
   }
 
   .daily-extreme-icon {
     width: 0.9em;
     height: 0.9em;
+  }
+
+  .daily-extreme-temperature {
+    min-width: 0;
+    line-height: 1.15;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .daily-minimum-extreme {
+    color: var(--cielo-color-muted);
   }
 
   .current-conditions-message {
@@ -173,8 +242,13 @@
   }
 
   .hourly-forecast {
-    position: fixed;
-    bottom: calc(1.9rem + env(safe-area-inset-bottom));
+    position: absolute;
+    bottom:
+      calc(
+        2.75rem
+        + var(--forecast-bottom-lift)
+        + env(safe-area-inset-bottom)
+      );
     left: 50%;
     width: calc(100% - 3.8rem);
     max-width: calc(var(--cielo-content-width) - 3.8rem);
@@ -260,6 +334,168 @@
     line-height: 1.15;
   }
 
+  .daily-forecast {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    max-width: var(--cielo-content-width);
+    padding:
+      0.55rem
+      1.35rem
+      calc(2.2rem + env(safe-area-inset-bottom));
+    margin-inline: auto;
+  }
+
+  .daily-scroll {
+    --daily-card-height: 28.7rem;
+
+    width: 100%;
+    max-height: min(100%, var(--daily-card-height));
+    overflow-y: auto;
+    border-radius: 1rem;
+    outline: none;
+    outline-offset: -0.2rem;
+    overscroll-behavior-y: contain;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .daily-scroll:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .daily-table {
+    --daily-condition-gap: 2rem;
+    --daily-extrema-column-width: clamp(9rem, 41vw, 10rem);
+    --daily-row-height: var(--cielo-row-height);
+    --daily-value-gap: 0.3rem;
+
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 0;
+    border-spacing: 0;
+  }
+
+  .daily-table tbody {
+    display: grid;
+    flex: 0 0 auto;
+    grid-auto-rows: var(--daily-row-height);
+    width: 100%;
+  }
+
+  .daily-table tr {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr)
+      var(--daily-extrema-column-width);
+    width: 100%;
+    height: var(--daily-row-height);
+  }
+
+  .daily-table th,
+  .daily-table td {
+    display: flex;
+    min-width: 0;
+    padding: 0.55rem;
+    align-items: center;
+  }
+
+  .daily-period + .daily-period {
+    border-top: 1px solid var(--cielo-color-border);
+  }
+
+  .daily-table .daily-weekday {
+    display: grid;
+    grid-template-columns: 3.25rem 1.75rem;
+    column-gap: var(--daily-condition-gap);
+    color: var(--cielo-color-text);
+    font-size: clamp(1.15rem, 5vw, 1.45rem);
+    font-weight: 580;
+    letter-spacing: -0.015em;
+    line-height: 1.1;
+    text-align: left;
+  }
+
+  .daily-weekday-details {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .daily-period[data-today="true"] .daily-weekday {
+    font-weight: 680;
+  }
+
+  .daily-condition-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .daily-date {
+    margin-top: 0.28rem;
+    color: var(--cielo-color-muted);
+    font-size: 0.72em;
+    font-weight: 480;
+    letter-spacing: 0;
+    line-height: 1;
+  }
+
+  .daily-table .daily-extrema-pair {
+    --daily-extrema-gap: var(--daily-value-gap);
+
+    color: var(--cielo-color-text);
+    font-size: clamp(1.05rem, 4.5vw, 1.3rem);
+    font-weight: 560;
+  }
+
+  .forecast-page-indicator {
+    position: fixed;
+    z-index: 4;
+    bottom:
+      calc(
+        0.9rem
+        + var(--forecast-bottom-lift)
+        + env(safe-area-inset-bottom)
+      );
+    left: 50%;
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    pointer-events: none;
+    transform: translateX(-50%);
+  }
+
+  .forecast-pages:focus-visible + .forecast-page-indicator {
+    border-radius: 0.5rem;
+    outline: var(--cielo-focus-outline);
+    outline-offset: 0.3rem;
+  }
+
+  .forecast-page-dot {
+    width: 0.35rem;
+    height: 0.35rem;
+    border-radius: 50%;
+    background: var(--cielo-color-muted);
+    opacity: 0.45;
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease;
+  }
+
+  .forecast-page-dot[data-active="true"] {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .forecast-page-dot {
+      transition: none;
+    }
+  }
+
   @media (min-width: 48rem) {
     .forecast-header {
       padding-top: calc(1.25rem + env(safe-area-inset-top));
@@ -281,27 +517,42 @@
 
   /* Preserve the mobile reading order while fitting short landscape views. */
   @media (orientation: landscape) and (max-height: 34rem) {
-    .forecast-screen {
-      overflow-y: auto;
-    }
-
     .forecast-header {
-      display: flex;
-      flex-direction: column;
-      min-height: 100%;
       padding:
         calc(0.8rem + env(safe-area-inset-top))
         max(var(--cielo-space-4), env(safe-area-inset-right))
-        max(0.8rem, env(safe-area-inset-bottom))
+        0
         max(var(--cielo-space-4), env(safe-area-inset-left));
     }
 
-    .current-conditions {
-      margin-top: 0;
+    .current-forecast-page {
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
     }
 
-    .current-reading {
-      --current-reading-size: clamp(4.75rem, 26vh, 7rem);
+    .current-forecast-page,
+    .daily-forecast-page {
+      padding-right: env(safe-area-inset-right);
+      padding-left: env(safe-area-inset-left);
+    }
+
+    .forecast-current-summary {
+      padding-right:
+        max(var(--forecast-data-inset), env(safe-area-inset-right));
+      padding-left:
+        max(var(--forecast-data-inset), env(safe-area-inset-left));
+    }
+
+    .forecast-page-content {
+      flex: 0 0 auto;
+    }
+
+    .current-conditions {
+      --current-reading-size:
+        clamp(4.25rem, calc(22vh - 0.75rem), 6rem);
+
+      margin-top: 0;
     }
 
     .current-condition-description {
@@ -316,7 +567,14 @@
       position: static;
       width: calc(100% - 1.8rem);
       padding-top: 1rem;
-      margin: auto auto 0;
+      margin:
+        auto
+        auto
+        calc(
+          2.75rem
+          + var(--forecast-bottom-lift)
+          + env(safe-area-inset-bottom)
+      );
       transform: none;
     }
   }

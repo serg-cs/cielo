@@ -1,0 +1,35 @@
+    <template id="daily-forecast-period-template">
+      <table>
+        <tbody>
+          <tr class="daily-period">
+            <th class="daily-weekday" scope="row">
+              <span class="daily-weekday-details">
+                <span class="daily-weekday-name"></span>
+                <span class="daily-date" aria-hidden="true"></span>
+              </span>
+              <svg
+                class="cielo-icon daily-condition-icon"
+                aria-hidden="true"
+                hidden
+              >
+                <use></use>
+              </svg>
+            </th>
+            <td class="daily-extrema-pair daily-row-extrema">
+              <span class="visually-hidden daily-minimum-description"></span>
+              <span class="visually-hidden daily-maximum-description"></span>
+              <span class="daily-extreme daily-minimum-extreme" aria-hidden="true">
+                <span
+                  class="daily-extreme-temperature daily-minimum-temperature"
+                >—</span>
+              </span>
+              <span class="daily-extreme daily-maximum-extreme" aria-hidden="true">
+                <span
+                  class="daily-extreme-temperature daily-maximum-temperature"
+                >—</span>
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </template>

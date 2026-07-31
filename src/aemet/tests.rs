@@ -123,11 +123,53 @@ fn parses_and_orders_daily_temperature_extrema() {
                     "dia": [
                         {
                             "fecha": "2026-08-01",
+                            "estado_cielo": [
+                                {
+                                    "periodo": "12-24",
+                                    "valor": "11",
+                                    "descripcion": "Despejado"
+                                },
+                                {
+                                    "periodo": "00-24",
+                                    "valor": "24",
+                                    "descripcion": "  Lluvia dÃ©bil  "
+                                }
+                            ],
                             "temperatura": {"minima": 22, "maxima": 37}
                         },
                         {
                             "fecha": "2026-07-31",
+                            "estado_cielo": [
+                                {"periodo": "00-24", "valor": null, "descripcion": ""},
+                                {
+                                    "periodo": "00-12",
+                                    "valor": "14",
+                                    "descripcion": "Nuboso"
+                                },
+                                {
+                                    "periodo": "12-24",
+                                    "valor": "11",
+                                    "descripcion": "Despejado"
+                                }
+                            ],
                             "temperatura": {"minima": "25", "maxima": "36"}
+                        },
+                        {
+                            "fecha": "2026-08-02",
+                            "estado_cielo": {
+                                "valor": "13",
+                                "descripcion": "Intervalos nubosos"
+                            },
+                            "temperatura": {"minima": 21, "maxima": 35}
+                        },
+                        {
+                            "fecha": "2026-08-03",
+                            "estado_cielo": {
+                                "periodo": "12-24",
+                                "valor": "11",
+                                "descripcion": "Despejado"
+                            },
+                            "temperatura": {"minima": 20, "maxima": 34}
                         }
                     ]
                 }
@@ -146,14 +188,128 @@ fn parses_and_orders_daily_temperature_extrema() {
                 date: "2026-07-31".to_owned(),
                 minimum_temperature_celsius: 25,
                 maximum_temperature_celsius: 36,
+                condition: Some(WeatherCondition::Sun),
+                description: Some("Despejado".to_owned()),
             },
             DailySummary {
                 date: "2026-08-01".to_owned(),
                 minimum_temperature_celsius: 22,
                 maximum_temperature_celsius: 37,
+                condition: Some(WeatherCondition::CloudDrizzle),
+                description: Some("Lluvia débil".to_owned()),
+            },
+            DailySummary {
+                date: "2026-08-02".to_owned(),
+                minimum_temperature_celsius: 21,
+                maximum_temperature_celsius: 35,
+                condition: Some(WeatherCondition::CloudSun),
+                description: Some("Intervalos nubosos".to_owned()),
+            },
+            DailySummary {
+                date: "2026-08-03".to_owned(),
+                minimum_temperature_celsius: 20,
+                maximum_temperature_celsius: 34,
+                condition: None,
+                description: None,
             },
         ]
     );
+}
+
+#[test]
+fn accepts_null_daily_sky_states() {
+    let archive = forecast_archive(
+        "localidad_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-31T08:00:00",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-31",
+                        "estado_cielo": null,
+                        "temperatura": {"minima": 25, "maxima": 36}
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let forecasts = parse_daily_forecast_archive(&archive)
+        .expect("null daily conditions should be treated as unavailable");
+
+    assert_eq!(forecasts[0].summaries[0].condition, None);
+    assert_eq!(forecasts[0].summaries[0].description, None);
+}
+
+#[test]
+fn rejects_duplicate_daily_condition_periods() {
+    let archive = forecast_archive(
+        "localidad_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-31T08:00:00",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-08-01",
+                        "estado_cielo": [
+                            {
+                                "periodo": "00-24",
+                                "valor": "11",
+                                "descripcion": "Despejado"
+                            },
+                            {
+                                "periodo": "00-24",
+                                "valor": "12",
+                                "descripcion": "Poco nuboso"
+                            }
+                        ],
+                        "temperatura": {"minima": 25, "maxima": 36}
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let error =
+        parse_daily_forecast_archive(&archive).expect_err("duplicate daily conditions should fail");
+
+    assert!(error.to_string().contains("duplicate 00-24 conditions"));
+}
+
+#[test]
+fn rejects_invalid_selected_daily_conditions() {
+    for (code, description, expected) in [
+        ("99", "Desconocido", "unknown daily condition code"),
+        ("11", "", "empty daily condition description"),
+    ] {
+        let body = format!(
+            r#"{{
+                "root": {{
+                    "id": "28079",
+                    "elaborado": "2026-07-31T08:00:00",
+                    "prediccion": {{
+                        "dia": [{{
+                            "fecha": "2026-08-01",
+                            "estado_cielo": {{
+                                "periodo": "00-24",
+                                "valor": "{code}",
+                                "descripcion": "{description}"
+                            }},
+                            "temperatura": {{"minima": 25, "maxima": 36}}
+                        }}]
+                    }}
+                }}
+            }}"#
+        );
+        let archive = forecast_archive("localidad_28079.json", &body);
+
+        let error = parse_daily_forecast_archive(&archive)
+            .expect_err("invalid selected daily condition should fail");
+
+        assert!(error.to_string().contains(expected));
+    }
 }
 
 #[test]

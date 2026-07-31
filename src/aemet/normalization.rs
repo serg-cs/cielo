@@ -69,6 +69,23 @@ struct DailySourceDay {
     date: String,
     #[serde(rename = "temperatura")]
     temperature: DailyTemperature,
+
+    #[serde(
+        default,
+        rename = "estado_cielo",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    sky_states: Vec<DailyForecastSkyState>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyForecastSkyState {
+    #[serde(default, rename = "valor")]
+    code: Option<String>,
+    #[serde(default, rename = "descripcion")]
+    description: Option<String>,
+    #[serde(default, rename = "periodo")]
+    period: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +159,7 @@ struct NormalizedCondition {
 enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
+    None(()),
 }
 
 fn deserialize_one_or_many<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -152,6 +170,7 @@ where
     Ok(match OneOrMany::deserialize(deserializer)? {
         OneOrMany::One(value) => vec![value],
         OneOrMany::Many(values) => values,
+        OneOrMany::None(()) => Vec::new(),
     })
 }
 
@@ -330,6 +349,11 @@ fn normalize_daily_forecast(
     let mut summaries = BTreeMap::new();
     for day in root.prediction.days {
         validate_date(&day.date)?;
+        let condition = select_daily_condition(
+            day.sky_states,
+            root.generated_at.starts_with(&day.date),
+            &root.id,
+        )?;
         let minimum_temperature_celsius = day
             .temperature
             .minimum
@@ -351,6 +375,8 @@ fn normalize_daily_forecast(
             date: day.date.clone(),
             minimum_temperature_celsius,
             maximum_temperature_celsius,
+            condition: condition.as_ref().map(|value| value.condition),
+            description: condition.map(|value| value.description),
         };
         if summaries.insert(day.date, summary).is_some() {
             bail!("daily forecast {} contains duplicate days", root.id);
@@ -365,6 +391,121 @@ fn normalize_daily_forecast(
         generated_at: root.generated_at,
         summaries: summaries.into_values().collect(),
     })
+}
+
+fn select_daily_condition(
+    sky_states: Vec<DailyForecastSkyState>,
+    allow_partial_fallback: bool,
+    municipality_id: &str,
+) -> Result<Option<NormalizedCondition>> {
+    let mut whole_day = None;
+    let mut unperioded = None;
+    let mut partial_periods = HashSet::new();
+    let mut partial = Vec::new();
+
+    // Index the semantic whole-day forms before considering horizon-specific periods.
+    for sky_state in sky_states {
+        let period = sky_state
+            .period
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_owned);
+        match period.as_deref() {
+            Some("00-24") => {
+                if whole_day.replace(sky_state).is_some() {
+                    bail!("daily forecast {municipality_id} contains duplicate 00-24 conditions");
+                }
+            }
+            None => {
+                if unperioded.replace(sky_state).is_some() {
+                    bail!(
+                        "daily forecast {municipality_id} contains duplicate unperioded conditions"
+                    );
+                }
+            }
+            Some(period) => {
+                let Some((duration, end_hour)) = daily_partial_period_rank(period) else {
+                    continue;
+                };
+                if daily_sky_state_is_empty(&sky_state) {
+                    continue;
+                }
+                if !partial_periods.insert(period.to_owned()) {
+                    bail!(
+                        "daily forecast {municipality_id} contains duplicate {period} conditions"
+                    );
+                }
+                partial.push((duration, end_hour, sky_state));
+            }
+        }
+    }
+
+    if let Some(condition) = normalize_daily_condition(whole_day, municipality_id)? {
+        return Ok(Some(condition));
+    }
+    if let Some(condition) = normalize_daily_condition(unperioded, municipality_id)? {
+        return Ok(Some(condition));
+    }
+    if !allow_partial_fallback {
+        return Ok(None);
+    }
+
+    // Prefer the widest remaining period, breaking equal spans toward the end of the day.
+    partial.sort_by_key(|(duration, end_hour, _)| (*duration, *end_hour));
+    let selected = partial.pop().map(|(_, _, sky_state)| sky_state);
+    normalize_daily_condition(selected, municipality_id)
+}
+
+fn normalize_daily_condition(
+    sky_state: Option<DailyForecastSkyState>,
+    municipality_id: &str,
+) -> Result<Option<NormalizedCondition>> {
+    let Some(sky_state) = sky_state else {
+        return Ok(None);
+    };
+    let code = sky_state.code.as_deref().unwrap_or_default().trim();
+    let description =
+        repair_iso_8859_15_mojibake(sky_state.description.as_deref().unwrap_or_default().trim());
+    if code.is_empty() && description.is_empty() {
+        return Ok(None);
+    }
+    if code.is_empty() {
+        bail!("empty daily condition code in forecast {municipality_id}");
+    }
+    let condition = WeatherCondition::from_aemet_code(code).with_context(|| {
+        format!("unknown daily condition code in forecast {municipality_id}: {code}")
+    })?;
+    if description.is_empty() {
+        bail!("empty daily condition description in forecast {municipality_id}");
+    }
+
+    Ok(Some(NormalizedCondition {
+        condition,
+        description,
+    }))
+}
+
+fn daily_sky_state_is_empty(sky_state: &DailyForecastSkyState) -> bool {
+    sky_state
+        .code
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+        && sky_state
+            .description
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+}
+
+fn daily_partial_period_rank(period: &str) -> Option<(u8, u8)> {
+    match period {
+        "00-06" => Some((6, 6)),
+        "06-12" => Some((6, 12)),
+        "12-18" => Some((6, 18)),
+        "18-24" => Some((6, 24)),
+        "00-12" => Some((12, 12)),
+        "12-24" => Some((12, 24)),
+        _ => None,
+    }
 }
 
 impl TemperatureValue {

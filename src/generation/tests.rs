@@ -501,6 +501,7 @@ fn generates_exact_readable_app_output() {
     );
     assert_generated_document_invariants(&dom);
     assert!(index.contains("<template id=\"municipality-row-template\">"));
+    assert!(index.contains("<template id=\"daily-forecast-period-template\">"));
     assert!(index.contains(r#"<meta name="generator" content="cielo">"#));
     assert!(index.contains("id=\"cielo-application\""));
     assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
@@ -590,6 +591,10 @@ fn builds_weather_snapshot() {
             .minimum_temperature_celsius,
         18
     );
+    assert_eq!(
+        snapshot.forecasts[0].days[0].summary.condition,
+        Some(WeatherCondition::CloudSun)
+    );
 }
 
 #[test]
@@ -626,6 +631,8 @@ fn writes_readable_weather_data_files() {
     assert_eq!(forecast[0]["date"], "2026-07-25");
     assert_eq!(forecast[0]["summary"]["temp_min_c"], 18);
     assert_eq!(forecast[0]["summary"]["temp_max_c"], 26);
+    assert_eq!(forecast[0]["summary"]["state"], "cloud-sun");
+    assert_eq!(forecast[0]["summary"]["desc"], "Intervalos nubosos");
     assert_eq!(forecast[0]["events"][0]["kind"], "sunrise");
     assert_eq!(forecast[0]["events"][0]["time"], "07:10");
     assert_eq!(forecast[0]["events"][1]["kind"], "sunset");
@@ -654,6 +661,8 @@ fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
         date: "2026-07-26".to_owned(),
         minimum_temperature_celsius: 17,
         maximum_temperature_celsius: 25,
+        condition: None,
+        description: None,
     });
     let snapshot = build_snapshot(source_data).expect("snapshot should build");
     let mut statistics = WeatherDataStatistics::default();
@@ -670,6 +679,8 @@ fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
     assert_eq!(later_day["date"], "2026-07-26");
     assert_eq!(later_day["summary"]["temp_min_c"], 17);
     assert_eq!(later_day["summary"]["temp_max_c"], 25);
+    assert_eq!(later_day["summary"]["state"], serde_json::Value::Null);
+    assert_eq!(later_day["summary"]["desc"], serde_json::Value::Null);
     assert_eq!(later_day["events"], serde_json::json!([]));
     assert_eq!(later_day["hours"], serde_json::json!([]));
 }
@@ -956,10 +967,16 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "current-maximum-temperature",
         "current-temperature-announcement",
         "current-conditions-message",
+        "forecast-pages",
+        "forecast-page-indicator",
+        "forecast-page-announcement",
         "hourly-forecast",
         "hourly-forecast-list",
+        "daily-forecast-title",
+        "daily-forecast-list",
         "municipality-row-template",
         "hourly-forecast-period-template",
+        "daily-forecast-period-template",
     ] {
         assert!(
             invariants.ids.contains(required_id),
@@ -968,14 +985,27 @@ fn assert_generated_document_invariants(dom: &RcDom) {
     }
     for required_class in [
         "forecast-screen",
+        "forecast-current-summary",
         "current-reading",
         "current-daily-extrema",
+        "daily-extrema-pair",
         "daily-extreme",
         "daily-extreme-icon",
+        "daily-extreme-temperature",
+        "daily-minimum-extreme",
+        "daily-maximum-extreme",
+        "forecast-page",
         "hourly-scroll",
         "hourly-hour",
         "hourly-condition-icon",
         "hourly-temperature",
+        "daily-scroll",
+        "daily-weekday",
+        "daily-weekday-details",
+        "daily-weekday-name",
+        "daily-date",
+        "daily-condition-icon",
+        "daily-row-extrema",
         "municipality-name",
         "municipality-province",
         "open-button",
@@ -1083,6 +1113,8 @@ fn sample_daily_forecast(id: &str) -> MunicipalityDailyForecast {
             date: "2026-07-25".to_owned(),
             minimum_temperature_celsius: 18,
             maximum_temperature_celsius: 26,
+            condition: Some(WeatherCondition::CloudSun),
+            description: Some("Intervalos nubosos".to_owned()),
         }],
     }
 }

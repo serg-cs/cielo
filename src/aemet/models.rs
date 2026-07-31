@@ -34,6 +34,9 @@ pub(crate) struct DailySummary {
     pub(crate) date: String,
     pub(crate) minimum_temperature_celsius: i16,
     pub(crate) maximum_temperature_celsius: i16,
+
+    pub(crate) condition: Option<WeatherCondition>,
+    pub(crate) description: Option<String>,
 }
 
 /// Solar times and hourly conditions for one local forecast day.

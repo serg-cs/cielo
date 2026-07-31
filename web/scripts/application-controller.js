@@ -101,6 +101,10 @@ export class ApplicationController {
       this.#handleDailySummaryChange,
     );
     this.#forecastStore.addEventListener(
+      "dailyforecastchange",
+      this.#handleDailyForecastChange,
+    );
+    this.#forecastStore.addEventListener(
       "hourlyforecastchange",
       this.#handleHourlyForecastChange,
     );
@@ -268,6 +272,7 @@ export class ApplicationController {
       this.#forecastStore.getCurrentConditions(municipalityId),
       this.#forecastStore.getCurrentDaySummary(municipalityId),
       this.#forecastStore.getHourlyForecastPeriods(municipalityId),
+      this.#forecastStore.getDailyForecastPeriods(municipalityId),
       this.#forecastStore.getForecastStatus(municipalityId),
     );
     this.#elements.locationsView.inert = true;
@@ -436,6 +441,17 @@ export class ApplicationController {
     this.#forecastController.setDailySummary(
       municipalityId,
       dailySummary,
+    );
+  };
+
+  #handleDailyForecastChange = (event) => {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+    const { municipalityId, periods } = event.detail;
+    this.#forecastController.setDailyForecastPeriods(
+      municipalityId,
+      periods,
     );
   };
 

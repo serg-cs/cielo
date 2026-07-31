@@ -61,15 +61,18 @@ struct CatalogMunicipalityDocument<'a> {
 #[derive(Debug, Serialize)]
 struct ForecastDayDocument<'a> {
     date: &'a str,
-    summary: ForecastSummaryDocument,
+    summary: ForecastSummaryDocument<'a>,
     events: Vec<ForecastEventDocument<'a>>,
     hours: Vec<ForecastHourDocument<'a>>,
 }
 
 #[derive(Debug, Serialize)]
-struct ForecastSummaryDocument {
+struct ForecastSummaryDocument<'a> {
     temp_min_c: i16,
     temp_max_c: i16,
+
+    state: Option<WeatherCondition>,
+    desc: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -395,6 +398,8 @@ fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
             summary: ForecastSummaryDocument {
                 temp_min_c: day.summary.minimum_temperature_celsius,
                 temp_max_c: day.summary.maximum_temperature_celsius,
+                state: day.summary.condition,
+                desc: day.summary.description.as_deref(),
             },
             events: day.hourly.as_ref().map_or_else(Vec::new, |hourly| {
                 vec![
