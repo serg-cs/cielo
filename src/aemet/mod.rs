@@ -9,7 +9,10 @@ mod tests;
 pub(crate) use client::AemetClient;
 #[cfg(test)]
 pub(crate) use models::HourlyForecast;
-pub(crate) use models::{AemetWeatherData, DailyForecast, MunicipalityForecast, WeatherCondition};
+pub(crate) use models::{
+    AemetWeatherData, DailyForecast, DailySummary, MunicipalityDailyForecast, MunicipalityForecast,
+    WeatherCondition,
+};
 pub(crate) use normalization::validate_municipality_id;
 
 #[cfg(test)]
@@ -20,5 +23,6 @@ use client::{MAX_ATTEMPTS, RequestKind, RetryKind, parse_retry_after, redact_url
 use decoding::repair_iso_8859_15_mojibake;
 #[cfg(test)]
 use normalization::{
-    ForecastDocument, normalize_forecast, parse_forecast_archive, parse_municipalities,
+    ForecastDocument, normalize_forecast, parse_daily_forecast_archive, parse_forecast_archive,
+    parse_municipalities,
 };

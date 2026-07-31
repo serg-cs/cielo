@@ -9,7 +9,10 @@ use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use tracing::warn;
 
 use super::decoding::{decode_iso_8859_15, repair_iso_8859_15_mojibake};
-use super::models::{DailyForecast, HourlyForecast, MunicipalityForecast, WeatherCondition};
+use super::models::{
+    DailyForecast, DailySummary, HourlyForecast, MunicipalityDailyForecast, MunicipalityForecast,
+    WeatherCondition,
+};
 
 const MAX_ARCHIVE_ENTRY_SIZE: u64 = 1024 * 1024;
 const MAX_DECOMPRESSED_ARCHIVE_SIZE: u64 = 256 * 1024 * 1024;
@@ -38,6 +41,49 @@ pub(super) struct ForecastRoot {
     province: String,
     #[serde(rename = "prediccion")]
     prediction: Prediction,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyForecastDocument {
+    root: DailyForecastRoot,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyForecastRoot {
+    id: String,
+    #[serde(rename = "elaborado")]
+    generated_at: String,
+    #[serde(rename = "prediccion")]
+    prediction: DailyPrediction,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyPrediction {
+    #[serde(rename = "dia")]
+    days: Vec<DailySourceDay>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailySourceDay {
+    #[serde(rename = "fecha")]
+    date: String,
+    #[serde(rename = "temperatura")]
+    temperature: DailyTemperature,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyTemperature {
+    #[serde(rename = "minima")]
+    minimum: TemperatureValue,
+    #[serde(rename = "maxima")]
+    maximum: TemperatureValue,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TemperatureValue {
+    Integer(i64),
+    Text(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,6 +242,142 @@ pub(super) fn parse_forecast_archive(bytes: &[u8]) -> Result<Vec<MunicipalityFor
     }
 
     Ok(forecasts)
+}
+
+pub(super) fn parse_daily_forecast_archive(bytes: &[u8]) -> Result<Vec<MunicipalityDailyForecast>> {
+    let decoder = GzDecoder::new(Cursor::new(bytes));
+    let mut archive = tar::Archive::new(decoder);
+    let mut forecasts = Vec::new();
+    let mut ids = HashSet::new();
+    let mut archive_entries = 0_usize;
+    let mut total_size = 0_u64;
+
+    for entry in archive
+        .entries()
+        .context("invalid daily forecast archive")?
+    {
+        if archive_entries >= MAX_FORECASTS {
+            bail!("daily forecast archive contains too many entries");
+        }
+        archive_entries += 1;
+        let mut entry = entry.context("invalid daily forecast archive entry")?;
+        if !entry.header().entry_type().is_file() {
+            bail!("daily forecast archive contains a non-file entry");
+        }
+
+        let path = entry
+            .path()
+            .context("invalid daily forecast archive path")?;
+        let path = path
+            .to_str()
+            .context("daily forecast archive path is not valid UTF-8")?
+            .to_owned();
+        let filename_id = daily_forecast_id_from_filename(&path)?;
+        let size = entry
+            .header()
+            .size()
+            .context("invalid daily forecast archive entry size")?;
+        if size > MAX_ARCHIVE_ENTRY_SIZE {
+            bail!("daily forecast archive entry is too large: {path}");
+        }
+        total_size = total_size
+            .checked_add(size)
+            .context("daily forecast archive decompressed size overflowed")?;
+        if total_size > MAX_DECOMPRESSED_ARCHIVE_SIZE {
+            bail!("daily forecast archive is too large when decompressed");
+        }
+
+        let mut body = Vec::with_capacity(u64_to_usize(size)?);
+        entry
+            .read_to_end(&mut body)
+            .with_context(|| format!("failed to read daily forecast archive entry: {path}"))?;
+        let document: DailyForecastDocument = serde_json::from_slice(&body)
+            .with_context(|| format!("invalid daily forecast JSON in {path}"))?;
+        let forecast = normalize_daily_forecast(document.root, &filename_id)?;
+
+        if !ids.insert(filename_id.clone()) {
+            bail!("duplicate daily forecast ID in archive: {filename_id}");
+        }
+        forecasts.push(forecast);
+    }
+
+    if archive_entries == 0 {
+        bail!("daily forecast archive is empty");
+    }
+    if forecasts.is_empty() {
+        bail!("daily forecast archive does not contain any forecasts");
+    }
+
+    Ok(forecasts)
+}
+
+fn normalize_daily_forecast(
+    root: DailyForecastRoot,
+    filename_id: &str,
+) -> Result<MunicipalityDailyForecast> {
+    validate_municipality_id(&root.id)?;
+    if root.id != filename_id {
+        bail!(
+            "daily forecast filename ID {filename_id} does not match document ID {}",
+            root.id
+        );
+    }
+    if root.generated_at.trim().is_empty() {
+        bail!("daily forecast {} has an empty generation time", root.id);
+    }
+
+    // Normalize daily values into a stable date index before publishing them.
+    let mut summaries = BTreeMap::new();
+    for day in root.prediction.days {
+        validate_date(&day.date)?;
+        let minimum_temperature_celsius = day
+            .temperature
+            .minimum
+            .parse_i16()
+            .with_context(|| format!("invalid minimum temperature in forecast {}", root.id))?;
+        let maximum_temperature_celsius = day
+            .temperature
+            .maximum
+            .parse_i16()
+            .with_context(|| format!("invalid maximum temperature in forecast {}", root.id))?;
+        if minimum_temperature_celsius > maximum_temperature_celsius {
+            bail!(
+                "daily forecast {} has a minimum temperature above its maximum on {}",
+                root.id,
+                day.date
+            );
+        }
+        let summary = DailySummary {
+            date: day.date.clone(),
+            minimum_temperature_celsius,
+            maximum_temperature_celsius,
+        };
+        if summaries.insert(day.date, summary).is_some() {
+            bail!("daily forecast {} contains duplicate days", root.id);
+        }
+    }
+    if summaries.is_empty() {
+        bail!("daily forecast {} does not contain any days", root.id);
+    }
+
+    Ok(MunicipalityDailyForecast {
+        id: root.id,
+        generated_at: root.generated_at,
+        summaries: summaries.into_values().collect(),
+    })
+}
+
+impl TemperatureValue {
+    fn parse_i16(self) -> Result<i16> {
+        match self {
+            Self::Integer(value) => {
+                i16::try_from(value).context("temperature is outside the supported range")
+            }
+            Self::Text(value) => value
+                .parse::<i16>()
+                .context("temperature is not an integer"),
+        }
+    }
 }
 
 pub(super) fn normalize_forecast(
@@ -394,6 +576,15 @@ fn forecast_id_from_filename(path: &str) -> Result<String> {
         .strip_prefix("localidad_h_")
         .and_then(|value| value.strip_suffix(".json"))
         .with_context(|| format!("unexpected forecast archive entry: {path}"))?;
+    validate_municipality_id(id)?;
+    Ok(id.to_owned())
+}
+
+fn daily_forecast_id_from_filename(path: &str) -> Result<String> {
+    let id = path
+        .strip_prefix("localidad_")
+        .and_then(|value| value.strip_suffix(".json"))
+        .with_context(|| format!("unexpected daily forecast archive entry: {path}"))?;
     validate_municipality_id(id)?;
     Ok(id.to_owned())
 }

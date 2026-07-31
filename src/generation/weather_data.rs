@@ -10,8 +10,8 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::aemet::{
-    AemetClient, AemetWeatherData, DailyForecast, MunicipalityForecast, WeatherCondition,
-    validate_municipality_id,
+    AemetClient, AemetWeatherData, DailyForecast, DailySummary, MunicipalityDailyForecast,
+    MunicipalityForecast, WeatherCondition, validate_municipality_id,
 };
 
 use super::GENERATOR_IDENTITY;
@@ -20,6 +20,7 @@ use super::publisher::{OutputKind, create_staging_directory, publish_staging_dir
 const FORECAST_BUNDLE_RANGE_SIZE: u16 = 20;
 const FORECASTS_DIRECTORY: &str = "forecasts";
 const CATALOG_FILENAME: &str = "catalog.json";
+const FORECAST_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug)]
 pub(crate) struct WeatherDataGenerationSummary {
@@ -60,9 +61,29 @@ struct CatalogMunicipalityDocument<'a> {
 #[derive(Debug, Serialize)]
 struct ForecastDayDocument<'a> {
     date: &'a str,
-    sunrise: &'a str,
-    sunset: &'a str,
+    summary: ForecastSummaryDocument,
+    events: Vec<ForecastEventDocument<'a>>,
     hours: Vec<ForecastHourDocument<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ForecastSummaryDocument {
+    temp_min_c: i16,
+    temp_max_c: i16,
+}
+
+#[derive(Debug, Serialize)]
+struct ForecastEventDocument<'a> {
+    kind: ForecastEventKind,
+    time: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+enum ForecastEventKind {
+    #[serde(rename = "sunrise")]
+    Sunrise,
+    #[serde(rename = "sunset")]
+    Sunset,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +96,7 @@ struct ForecastHourDocument<'a> {
 
 #[derive(Debug, Serialize)]
 struct ForecastBundleDocument<'a> {
+    schema_version: u8,
     forecasts: BTreeMap<&'a str, Vec<ForecastDayDocument<'a>>>,
 }
 
@@ -91,7 +113,20 @@ pub(super) enum TimeZone {
 #[derive(Debug)]
 pub(super) struct WeatherDataSnapshot {
     pub(super) municipalities: Vec<MunicipalityRecord>,
-    pub(super) forecasts: Vec<MunicipalityForecast>,
+    pub(super) forecasts: Vec<MergedMunicipalityForecast>,
+}
+
+#[derive(Debug)]
+pub(super) struct MergedMunicipalityForecast {
+    pub(super) id: String,
+    generated_at: String,
+    pub(super) days: Vec<MergedForecastDay>,
+}
+
+#[derive(Debug)]
+pub(super) struct MergedForecastDay {
+    pub(super) summary: DailySummary,
+    pub(super) hourly: Option<DailyForecast>,
 }
 
 pub(crate) async fn generate_weather_data(
@@ -121,16 +156,43 @@ pub(super) fn build_snapshot(source_data: AemetWeatherData) -> Result<WeatherDat
     let AemetWeatherData {
         municipalities: master_municipalities,
         mut forecasts,
+        daily_forecasts,
     } = source_data;
     forecasts.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut daily_forecasts = index_daily_forecasts(daily_forecasts)?;
 
-    let mut forecast_ids = HashSet::with_capacity(forecasts.len());
+    let mut source_forecast_ids = HashSet::with_capacity(forecasts.len());
+    let mut retained_forecast_ids = HashSet::with_capacity(forecasts.len());
     let mut municipalities = Vec::with_capacity(forecasts.len());
+    let mut merged_forecasts = Vec::with_capacity(forecasts.len());
     let mut forecast_only_count = 0_usize;
-    for forecast in &forecasts {
+    let mut missing_daily_count = 0_usize;
+    let mut missing_daily_date_count = 0_usize;
+    for forecast in forecasts {
         validate_municipality_id(&forecast.id)?;
-        if !forecast_ids.insert(forecast.id.as_str()) {
+        if !source_forecast_ids.insert(forecast.id.clone()) {
             bail!("duplicate forecast ID: {}", forecast.id);
+        }
+
+        let Some(daily_forecast) = daily_forecasts.remove(&forecast.id) else {
+            missing_daily_count += 1;
+            warn!(
+                municipality_id = %forecast.id,
+                municipality_name = %forecast.name,
+                "excluding hourly forecast without a daily forecast"
+            );
+            continue;
+        };
+        let missing_dates = missing_daily_dates(&forecast, &daily_forecast);
+        if !missing_dates.is_empty() {
+            missing_daily_date_count += missing_dates.len();
+            warn!(
+                municipality_id = %forecast.id,
+                municipality_name = %forecast.name,
+                missing_dates = ?missing_dates,
+                "excluding hourly forecast without matching daily summaries"
+            );
+            continue;
         }
 
         let source_name = if let Some(master_name) = master_municipalities.get(&forecast.id) {
@@ -154,22 +216,98 @@ pub(super) fn build_snapshot(source_data: AemetWeatherData) -> Result<WeatherDat
             province: province.to_owned(),
             time_zone: time_zone_for(&forecast.id),
         });
+        retained_forecast_ids.insert(forecast.id.clone());
+        merged_forecasts.push(merge_forecasts(forecast, daily_forecast)?);
     }
 
     let master_only_count = master_municipalities
         .keys()
-        .filter(|id| !forecast_ids.contains(id.as_str()))
+        .filter(|id| !retained_forecast_ids.contains(id.as_str()))
         .count();
-    if forecast_only_count > 0 || master_only_count > 0 {
+    let daily_only_count = daily_forecasts.len();
+    if forecast_only_count > 0
+        || master_only_count > 0
+        || daily_only_count > 0
+        || missing_daily_count > 0
+        || missing_daily_date_count > 0
+    {
         warn!(
             forecast_only = forecast_only_count,
             master_only = master_only_count,
-            "AEMET municipality products contain different ID sets"
+            daily_only = daily_only_count,
+            missing_daily = missing_daily_count,
+            missing_daily_dates = missing_daily_date_count,
+            "AEMET municipality products produced a reduced merged forecast set"
         );
     }
+    if merged_forecasts.is_empty() {
+        bail!("AEMET municipality products do not contain any mergeable forecasts");
+    }
+
     Ok(WeatherDataSnapshot {
         municipalities,
-        forecasts,
+        forecasts: merged_forecasts,
+    })
+}
+
+fn index_daily_forecasts(
+    daily_forecasts: Vec<MunicipalityDailyForecast>,
+) -> Result<BTreeMap<String, MunicipalityDailyForecast>> {
+    let mut index = BTreeMap::new();
+    for forecast in daily_forecasts {
+        validate_municipality_id(&forecast.id)?;
+        if index.insert(forecast.id.clone(), forecast).is_some() {
+            bail!("duplicate daily forecast ID");
+        }
+    }
+    Ok(index)
+}
+
+fn missing_daily_dates(
+    forecast: &MunicipalityForecast,
+    daily_forecast: &MunicipalityDailyForecast,
+) -> Vec<String> {
+    let daily_dates = daily_forecast
+        .summaries
+        .iter()
+        .map(|summary| summary.date.as_str())
+        .collect::<HashSet<_>>();
+    forecast
+        .daily_forecasts
+        .iter()
+        .filter(|day| !daily_dates.contains(day.date.as_str()))
+        .map(|day| day.date.clone())
+        .collect()
+}
+
+fn merge_forecasts(
+    forecast: MunicipalityForecast,
+    daily_forecast: MunicipalityDailyForecast,
+) -> Result<MergedMunicipalityForecast> {
+    let mut hourly_by_date = forecast
+        .daily_forecasts
+        .into_iter()
+        .map(|day| (day.date.clone(), day))
+        .collect::<BTreeMap<_, _>>();
+    let days = daily_forecast
+        .summaries
+        .into_iter()
+        .map(|summary| {
+            let hourly = hourly_by_date.remove(&summary.date);
+            MergedForecastDay { summary, hourly }
+        })
+        .collect();
+    if !hourly_by_date.is_empty() {
+        bail!(
+            "forecast {} retained hourly dates without daily summaries",
+            forecast.id
+        );
+    }
+
+    Ok(MergedMunicipalityForecast {
+        id: forecast.id,
+        generated_at: forecast.generated_at.max(daily_forecast.generated_at),
+        days,
     })
 }
 
@@ -206,12 +344,15 @@ pub(super) fn write_weather_data_files(
         bundles
             .entry(forecast_bundle_path(&forecast.id)?)
             .or_default()
-            .insert(&forecast.id, forecast_days(&forecast.daily_forecasts));
+            .insert(&forecast.id, forecast_days(&forecast.days));
     }
 
     let forecast_bundle_files = bundles.len();
     for (relative_path, forecasts) in bundles {
-        let document = ForecastBundleDocument { forecasts };
+        let document = ForecastBundleDocument {
+            schema_version: FORECAST_SCHEMA_VERSION,
+            forecasts,
+        };
         write_json(output_directory, &relative_path, &document, statistics)?;
     }
     Ok(forecast_bundle_files)
@@ -247,15 +388,31 @@ fn group_municipalities_by_province(
         .collect())
 }
 
-fn forecast_days(daily_forecasts: &[DailyForecast]) -> Vec<ForecastDayDocument<'_>> {
-    daily_forecasts
-        .iter()
-        .map(|daily_forecast| ForecastDayDocument {
-            date: &daily_forecast.date,
-            sunrise: &daily_forecast.sunrise,
-            sunset: &daily_forecast.sunset,
-            hours: daily_forecast
-                .hourly_forecasts
+fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
+    days.iter()
+        .map(|day| ForecastDayDocument {
+            date: &day.summary.date,
+            summary: ForecastSummaryDocument {
+                temp_min_c: day.summary.minimum_temperature_celsius,
+                temp_max_c: day.summary.maximum_temperature_celsius,
+            },
+            events: day.hourly.as_ref().map_or_else(Vec::new, |hourly| {
+                vec![
+                    ForecastEventDocument {
+                        kind: ForecastEventKind::Sunrise,
+                        time: &hourly.sunrise,
+                    },
+                    ForecastEventDocument {
+                        kind: ForecastEventKind::Sunset,
+                        time: &hourly.sunset,
+                    },
+                ]
+            }),
+            hours: day
+                .hourly
+                .as_ref()
+                .map(|hourly| hourly.hourly_forecasts.as_slice())
+                .unwrap_or_default()
                 .iter()
                 .map(|forecast| ForecastHourDocument {
                     hour: forecast.hour,

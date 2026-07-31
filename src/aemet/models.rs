@@ -7,6 +7,7 @@ use serde::Serialize;
 pub(crate) struct AemetWeatherData {
     pub(crate) municipalities: HashMap<String, String>,
     pub(crate) forecasts: Vec<MunicipalityForecast>,
+    pub(crate) daily_forecasts: Vec<MunicipalityDailyForecast>,
 }
 
 /// Normalized hourly forecast for one municipality.
@@ -17,6 +18,22 @@ pub(crate) struct MunicipalityForecast {
     pub(crate) province: String,
     pub(crate) generated_at: String,
     pub(crate) daily_forecasts: Vec<DailyForecast>,
+}
+
+/// Normalized daily forecast for one municipality.
+#[derive(Clone, Debug)]
+pub(crate) struct MunicipalityDailyForecast {
+    pub(crate) id: String,
+    pub(crate) generated_at: String,
+    pub(crate) summaries: Vec<DailySummary>,
+}
+
+/// Daily aggregate values for one local forecast day.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DailySummary {
+    pub(crate) date: String,
+    pub(crate) minimum_temperature_celsius: i16,
+    pub(crate) maximum_temperature_celsius: i16,
 }
 
 /// Solar times and hourly conditions for one local forecast day.

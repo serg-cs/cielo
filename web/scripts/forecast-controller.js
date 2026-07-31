@@ -13,6 +13,7 @@ export class ForecastController {
   #onClose;
   #municipality = null;
   #currentConditions = null;
+  #dailySummary = null;
   #hourlyForecastPeriods = [];
   #forecastStatus = "loading";
   #hourlyItems = [];
@@ -34,11 +35,13 @@ export class ForecastController {
   show(
     municipality,
     currentConditions,
+    dailySummary,
     hourlyForecastPeriods,
     forecastStatus,
   ) {
     this.#municipality = municipality;
     this.#currentConditions = currentConditions;
+    this.#dailySummary = dailySummary;
     this.#hourlyForecastPeriods = hourlyForecastPeriods;
     this.#forecastStatus = forecastStatus;
     this.#resetHourlyScrollOnRender = true;
@@ -76,6 +79,15 @@ export class ForecastController {
     this.#renderCurrentConditions();
   }
 
+  setDailySummary(municipalityId, dailySummary) {
+    if (this.#municipality?.id !== municipalityId) {
+      return;
+    }
+
+    this.#dailySummary = dailySummary;
+    this.#renderCurrentConditions();
+  }
+
   setHourlyForecastPeriods(municipalityId, periods) {
     if (this.#municipality?.id !== municipalityId) {
       return;
@@ -100,6 +112,7 @@ export class ForecastController {
     delete this.#elements.root.dataset.active;
     this.#municipality = null;
     this.#currentConditions = null;
+    this.#dailySummary = null;
     this.#hourlyForecastPeriods = [];
     this.#forecastStatus = "loading";
     document.removeEventListener("keydown", this.#handleDocumentKeydown);
@@ -254,8 +267,10 @@ export class ForecastController {
 
   #renderCurrentConditions() {
     const hasCurrentConditions = this.#currentConditions !== null;
+    const hasDailySummary = hasCurrentConditions && this.#dailySummary !== null;
     this.#elements.currentReading.hidden = !hasCurrentConditions;
     this.#elements.currentConditionDescription.hidden = !hasCurrentConditions;
+    this.#elements.currentDailyExtrema.hidden = !hasDailySummary;
     this.#elements.currentConditionsMessage.hidden = hasCurrentConditions;
     if (this.#currentConditions === null) {
       setDynamicIcon(this.#elements.currentConditionIcon, null);
@@ -263,6 +278,8 @@ export class ForecastController {
       this.#elements.currentConditionsMessage.textContent =
         this.#forecastStatusMessage;
       this.#elements.currentTemperatureValue.textContent = "";
+      this.#elements.currentMinimumTemperature.textContent = "";
+      this.#elements.currentMaximumTemperature.textContent = "";
       this.#elements.currentTemperatureAnnouncement.textContent = "";
       return;
     }
@@ -276,8 +293,22 @@ export class ForecastController {
     this.#elements.currentConditionsMessage.textContent = "";
     this.#elements.currentTemperatureValue.textContent =
       `${this.#currentConditions.temperatureCelsius}°`;
+    if (this.#dailySummary === null) {
+      this.#elements.currentMinimumTemperature.textContent = "";
+      this.#elements.currentMaximumTemperature.textContent = "";
+      this.#elements.currentTemperatureAnnouncement.textContent =
+        `Temperatura actual: ${this.#currentConditions.temperatureCelsius} grados Celsius`;
+      return;
+    }
+
+    this.#elements.currentMinimumTemperature.textContent =
+      `${this.#dailySummary.minimumTemperatureCelsius}°`;
+    this.#elements.currentMaximumTemperature.textContent =
+      `${this.#dailySummary.maximumTemperatureCelsius}°`;
     this.#elements.currentTemperatureAnnouncement.textContent =
-      `Temperatura actual: ${this.#currentConditions.temperatureCelsius} grados Celsius`;
+      `Temperatura actual: ${this.#currentConditions.temperatureCelsius} grados Celsius. ` +
+      `Mínima prevista: ${this.#dailySummary.minimumTemperatureCelsius} grados Celsius. ` +
+      `Máxima prevista: ${this.#dailySummary.maximumTemperatureCelsius} grados Celsius`;
   }
 
   #renderHourlyForecast() {
@@ -395,6 +426,18 @@ function captureForecastElements(root) {
     ),
     currentConditionDescription: requiredElement(
       root.querySelector("#current-condition-description"),
+      HTMLElement,
+    ),
+    currentDailyExtrema: requiredElement(
+      root.querySelector("#current-daily-extrema"),
+      HTMLElement,
+    ),
+    currentMinimumTemperature: requiredElement(
+      root.querySelector("#current-minimum-temperature"),
+      HTMLElement,
+    ),
+    currentMaximumTemperature: requiredElement(
+      root.querySelector("#current-maximum-temperature"),
       HTMLElement,
     ),
     currentConditionsMessage: requiredElement(

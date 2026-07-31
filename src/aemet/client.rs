@@ -8,14 +8,16 @@ use tracing::warn;
 
 use super::{
     AemetWeatherData,
-    normalization::{parse_forecast_archive, parse_municipalities},
+    normalization::{parse_daily_forecast_archive, parse_forecast_archive, parse_municipalities},
 };
 
 const API_BASE_URL: &str = "https://opendata.aemet.es/opendata/";
+const DAILY_FORECAST_ENDPOINT: &str = "api/prediccion/especifica/municipio/diaria/todos";
 const FORECAST_ENDPOINT: &str = "api/prediccion/especifica/municipio/horaria/todos";
 const MUNICIPALITIES_ENDPOINT: &str = "api/maestro/municipios";
 pub(super) const MAX_ATTEMPTS: usize = 4;
 const MAX_ENVELOPE_SIZE: usize = 64 * 1024;
+const MAX_DAILY_FORECAST_ARCHIVE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_FORECAST_ARCHIVE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_MUNICIPALITIES_SIZE: usize = 8 * 1024 * 1024;
 const RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(15);
@@ -79,23 +81,27 @@ impl AemetClient {
         })
     }
 
-    /// Fetch and normalize the municipality and hourly forecast products.
+    /// Fetch and normalize the municipality, hourly, and daily forecast products.
     pub(crate) async fn fetch(&self) -> Result<AemetWeatherData> {
-        // Resolve and download both independent products concurrently.
-        let (municipality_bytes, forecast_bytes) = tokio::try_join!(
+        // Resolve and download the independent products concurrently.
+        let (municipality_bytes, forecast_bytes, daily_forecast_bytes) = tokio::try_join!(
             self.fetch_product(MUNICIPALITIES_ENDPOINT, MAX_MUNICIPALITIES_SIZE),
             self.fetch_product(FORECAST_ENDPOINT, MAX_FORECAST_ARCHIVE_SIZE),
+            self.fetch_product(DAILY_FORECAST_ENDPOINT, MAX_DAILY_FORECAST_ARCHIVE_SIZE,),
         )?;
 
-        // Normalize AEMET's two different text encodings into domain values.
+        // Normalize AEMET's product encodings and shapes into domain values.
         let municipalities = parse_municipalities(&municipality_bytes)
             .context("failed to parse AEMET municipalities")?;
         let forecasts = parse_forecast_archive(&forecast_bytes)
             .context("failed to parse AEMET hourly forecast archive")?;
+        let daily_forecasts = parse_daily_forecast_archive(&daily_forecast_bytes)
+            .context("failed to parse AEMET daily forecast archive")?;
 
         Ok(AemetWeatherData {
             municipalities,
             forecasts,
+            daily_forecasts,
         })
     }
 

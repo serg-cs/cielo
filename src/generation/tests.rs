@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::aemet::{
-    AemetWeatherData, DailyForecast, HourlyForecast, MunicipalityForecast, WeatherCondition,
+    AemetWeatherData, DailyForecast, DailySummary, HourlyForecast, MunicipalityDailyForecast,
+    MunicipalityForecast, WeatherCondition,
 };
 use html5ever::{parse_document, tendril::TendrilSink};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
@@ -572,15 +573,22 @@ fn builds_weather_snapshot() {
     assert_eq!(snapshot.municipalities[0].id, "35001");
     assert_eq!(snapshot.municipalities[0].name, "El Arco");
     assert_eq!(snapshot.municipalities[0].province, "Las Palmas");
-    assert_eq!(snapshot.forecasts[0].daily_forecasts.len(), 1);
+    assert_eq!(snapshot.forecasts[0].days.len(), 1);
 
+    let hourly = snapshot.forecasts[0].days[0]
+        .hourly
+        .as_ref()
+        .expect("matching hourly day should be retained");
+    assert_eq!(hourly.hourly_forecasts[0].temperature_celsius, 24);
     assert_eq!(
-        snapshot.forecasts[0].daily_forecasts[0].hourly_forecasts[0].temperature_celsius,
-        24
+        hourly.hourly_forecasts[0].condition,
+        WeatherCondition::CloudSun
     );
     assert_eq!(
-        snapshot.forecasts[0].daily_forecasts[0].hourly_forecasts[0].condition,
-        WeatherCondition::CloudSun
+        snapshot.forecasts[0].days[0]
+            .summary
+            .minimum_temperature_celsius,
+        18
     );
 }
 
@@ -609,14 +617,19 @@ fn writes_readable_weather_data_files() {
     .expect("forecast bundle should decode");
     let forecast = &bundle["forecasts"]["35001"];
 
+    assert_eq!(bundle["schema_version"], 2);
     assert_eq!(catalog["generator"], "cielo");
     assert_eq!(catalog["updated_at"], "2026-07-25T08:00:00");
     assert_eq!(catalog["provinces"][0]["name"], "Las Palmas");
     assert_eq!(catalog["provinces"][0]["tz"], "Atlantic/Canary");
     assert_eq!(catalog["provinces"][0]["municipalities"][0]["id"], "35001");
     assert_eq!(forecast[0]["date"], "2026-07-25");
-    assert_eq!(forecast[0]["sunrise"], "07:10");
-    assert_eq!(forecast[0]["sunset"], "20:55");
+    assert_eq!(forecast[0]["summary"]["temp_min_c"], 18);
+    assert_eq!(forecast[0]["summary"]["temp_max_c"], 26);
+    assert_eq!(forecast[0]["events"][0]["kind"], "sunrise");
+    assert_eq!(forecast[0]["events"][0]["time"], "07:10");
+    assert_eq!(forecast[0]["events"][1]["kind"], "sunset");
+    assert_eq!(forecast[0]["events"][1]["time"], "20:55");
     assert_eq!(forecast[0]["hours"][0]["temp_c"], 24);
     assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
     assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
@@ -634,16 +647,67 @@ fn writes_readable_weather_data_files() {
 }
 
 #[test]
+fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
+    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
+    let mut source_data = sample_source_data();
+    source_data.daily_forecasts[0].summaries.push(DailySummary {
+        date: "2026-07-26".to_owned(),
+        minimum_temperature_celsius: 17,
+        maximum_temperature_celsius: 25,
+    });
+    let snapshot = build_snapshot(source_data).expect("snapshot should build");
+    let mut statistics = WeatherDataStatistics::default();
+
+    write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
+        .expect("weather-data files should write");
+
+    let bundle: serde_json::Value = serde_json::from_slice(
+        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
+            .expect("forecast bundle should be readable"),
+    )
+    .expect("forecast bundle should decode");
+    let later_day = &bundle["forecasts"]["35001"][1];
+    assert_eq!(later_day["date"], "2026-07-26");
+    assert_eq!(later_day["summary"]["temp_min_c"], 17);
+    assert_eq!(later_day["summary"]["temp_max_c"], 25);
+    assert_eq!(later_day["events"], serde_json::json!([]));
+    assert_eq!(later_day["hours"], serde_json::json!([]));
+}
+
+#[test]
+fn drops_a_municipality_when_an_hourly_day_has_no_daily_summary() {
+    let mut source_data = sample_source_data();
+    source_data
+        .municipalities
+        .insert("35002".to_owned(), "Missing summary".to_owned());
+    let mut incomplete_forecast = sample_forecast("35002");
+    incomplete_forecast.daily_forecasts[0].date = "2026-07-26".to_owned();
+    source_data.forecasts.push(incomplete_forecast);
+    source_data
+        .daily_forecasts
+        .push(sample_daily_forecast("35002"));
+
+    let snapshot = build_snapshot(source_data).expect("valid municipalities should be retained");
+
+    assert_eq!(snapshot.municipalities.len(), 1);
+    assert_eq!(snapshot.municipalities[0].id, "35001");
+    assert_eq!(snapshot.forecasts.len(), 1);
+    assert_eq!(snapshot.forecasts[0].id, "35001");
+}
+
+#[test]
 fn groups_forecasts_into_stable_twenty_id_ranges() {
     let temporary_root = tempfile::tempdir().expect("temporary root should be created");
     let mut source_data = sample_source_data();
     source_data.municipalities.clear();
     source_data.forecasts.clear();
+    source_data.daily_forecasts.clear();
     for id in ["35000", "35019", "35020", "36000"] {
         source_data
             .municipalities
             .insert(id.to_owned(), format!("Municipality {id}"));
         source_data.forecasts.push(sample_forecast(id));
+        source_data.daily_forecasts.push(sample_daily_forecast(id));
     }
     let snapshot = build_snapshot(source_data).expect("snapshot should build");
     let mut statistics = WeatherDataStatistics::default();
@@ -887,6 +951,9 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "municipality-title",
         "current-condition-icon",
         "current-condition-description",
+        "current-daily-extrema",
+        "current-minimum-temperature",
+        "current-maximum-temperature",
         "current-temperature-announcement",
         "current-conditions-message",
         "hourly-forecast",
@@ -902,6 +969,9 @@ fn assert_generated_document_invariants(dom: &RcDom) {
     for required_class in [
         "forecast-screen",
         "current-reading",
+        "current-daily-extrema",
+        "daily-extreme",
+        "daily-extreme-icon",
         "hourly-scroll",
         "hourly-hour",
         "hourly-condition-icon",
@@ -919,7 +989,7 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         );
     }
 
-    assert_eq!(invariants.symbol_count, 21);
+    assert_eq!(invariants.symbol_count, 23);
     for target in invariants.use_targets {
         assert!(
             invariants.ids.contains(&target),
@@ -1001,6 +1071,19 @@ fn sample_source_data() -> AemetWeatherData {
     AemetWeatherData {
         municipalities: HashMap::from([("35001".to_owned(), "Arco, El".to_owned())]),
         forecasts: vec![sample_forecast("35001")],
+        daily_forecasts: vec![sample_daily_forecast("35001")],
+    }
+}
+
+fn sample_daily_forecast(id: &str) -> MunicipalityDailyForecast {
+    MunicipalityDailyForecast {
+        id: id.to_owned(),
+        generated_at: "2026-07-25T08:00:00".to_owned(),
+        summaries: vec![DailySummary {
+            date: "2026-07-25".to_owned(),
+            minimum_temperature_celsius: 18,
+            maximum_temperature_celsius: 26,
+        }],
     }
 }
 

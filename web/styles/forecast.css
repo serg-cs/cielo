@@ -140,6 +140,29 @@
     overflow-wrap: anywhere;
   }
 
+  .current-daily-extrema {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin: 0.38rem 0 0 0.9rem;
+    color: var(--cielo-color-text);
+    font-size: clamp(1.25rem, 4.5vw, 1.45rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .daily-extreme {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.12rem;
+  }
+
+  .daily-extreme-icon {
+    width: 0.9em;
+    height: 0.9em;
+  }
+
   .current-conditions-message {
     display: block;
     padding: 2.2rem 0.9rem;

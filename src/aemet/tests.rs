@@ -112,6 +112,74 @@ fn parses_and_orders_forecast_temperatures() {
 }
 
 #[test]
+fn parses_and_orders_daily_temperature_extrema() {
+    let archive = forecast_archive(
+        "localidad_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-31T08:00:00",
+                "prediccion": {
+                    "dia": [
+                        {
+                            "fecha": "2026-08-01",
+                            "temperatura": {"minima": 22, "maxima": 37}
+                        },
+                        {
+                            "fecha": "2026-07-31",
+                            "temperatura": {"minima": "25", "maxima": "36"}
+                        }
+                    ]
+                }
+            }
+        }"#,
+    );
+
+    let forecasts = parse_daily_forecast_archive(&archive).expect("daily archive should parse");
+
+    assert_eq!(forecasts.len(), 1);
+    assert_eq!(forecasts[0].id, "28079");
+    assert_eq!(
+        forecasts[0].summaries,
+        vec![
+            DailySummary {
+                date: "2026-07-31".to_owned(),
+                minimum_temperature_celsius: 25,
+                maximum_temperature_celsius: 36,
+            },
+            DailySummary {
+                date: "2026-08-01".to_owned(),
+                minimum_temperature_celsius: 22,
+                maximum_temperature_celsius: 37,
+            },
+        ]
+    );
+}
+
+#[test]
+fn rejects_invalid_daily_temperature_ranges() {
+    let archive = forecast_archive(
+        "localidad_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-31T08:00:00",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-31",
+                        "temperatura": {"minima": "37", "maxima": "25"}
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let error = parse_daily_forecast_archive(&archive).expect_err("invalid extrema should fail");
+
+    assert!(error.to_string().contains("above its maximum"));
+}
+
+#[test]
 fn normalizes_scalar_sky_state_shape() {
     let archive = forecast_archive(
         "localidad_h_28079.json",
@@ -545,6 +613,97 @@ async fn follows_an_authenticated_envelope_to_same_origin_data() {
     assert_eq!(result, b"weather-data");
     product_mock.assert_async().await;
     data_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn fetches_and_normalizes_all_weather_products() {
+    let mut server = mockito::Server::new_async().await;
+    let products = [
+        (
+            "/api/maestro/municipios",
+            "/data/municipalities",
+            br#"[{"id":"id28079","nombre":"Madrid"}]"#.to_vec(),
+        ),
+        (
+            "/api/prediccion/especifica/municipio/horaria/todos",
+            "/data/hourly",
+            forecast_archive(
+                "localidad_h_28079.json",
+                r#"{
+                    "root": {
+                        "id": "28079",
+                        "elaborado": "2026-07-31T08:00:00",
+                        "nombre": "Madrid",
+                        "provincia": "Madrid",
+                        "prediccion": {
+                            "dia": [{
+                                "fecha": "2026-07-31",
+                                "orto": "07:10",
+                                "ocaso": "21:30",
+                                "estado_cielo": {
+                                    "periodo": "10",
+                                    "valor": "11",
+                                    "descripcion": "Despejado"
+                                },
+                                "temperatura": {"periodo": "10", "valor": "27"}
+                            }]
+                        }
+                    }
+                }"#,
+            ),
+        ),
+        (
+            "/api/prediccion/especifica/municipio/diaria/todos",
+            "/data/daily",
+            forecast_archive(
+                "localidad_28079.json",
+                r#"{
+                    "root": {
+                        "id": "28079",
+                        "elaborado": "2026-07-31T08:00:00",
+                        "prediccion": {
+                            "dia": [{
+                                "fecha": "2026-07-31",
+                                "temperatura": {"minima": "25", "maxima": "36"}
+                            }]
+                        }
+                    }
+                }"#,
+            ),
+        ),
+    ];
+    let mut mocks = Vec::new();
+    for (product_path, data_path, body) in products {
+        let data_url = format!("{}{data_path}", server.url());
+        let envelope = format!(r#"{{"descripcion":"ok","estado":200,"datos":"{data_url}"}}"#);
+        mocks.push(
+            server
+                .mock("GET", product_path)
+                .match_header("api_key", "test-key")
+                .with_status(200)
+                .with_body(envelope)
+                .create_async()
+                .await,
+        );
+        mocks.push(
+            server
+                .mock("GET", data_path)
+                .with_status(200)
+                .with_body(body)
+                .create_async()
+                .await,
+        );
+    }
+    let client = test_client(&server, Duration::ZERO);
+
+    let weather_data = client.fetch().await.expect("all products should parse");
+
+    assert_eq!(weather_data.municipalities.len(), 1);
+    assert_eq!(weather_data.forecasts.len(), 1);
+    assert_eq!(weather_data.daily_forecasts.len(), 1);
+    for product_mock in mocks {
+        product_mock.assert_async().await;
+    }
 }
 
 #[tokio::test]
