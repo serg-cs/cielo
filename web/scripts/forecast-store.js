@@ -12,6 +12,15 @@ const temperatureMinimum = -32_768;
 const temperatureMaximum = 32_767;
 const forecastBundleRangeSize = 20;
 const forecastSchemaVersion = 2;
+const dailyPrecipitationProbabilityPeriods = new Set([
+  "00-06",
+  "06-12",
+  "12-18",
+  "18-24",
+  "00-12",
+  "12-24",
+  "00-24",
+]);
 const supportedConditions = new Set([
   "cloud",
   "cloud-drizzle",
@@ -37,6 +46,9 @@ const supportedConditions = new Set([
  * @property {number} temperatureCelsius
  * @property {string} condition
  * @property {string} description
+ * @property {number | "trace" | null} precipitationMillimetres
+ * @property {number | null} precipitationProbabilityPercent
+ * @property {string | null} precipitationProbabilityPeriod
  */
 
 /**
@@ -46,6 +58,8 @@ const supportedConditions = new Set([
  *
  * @property {string | null} condition
  * @property {string | null} description
+ * @property {number | null} precipitationProbabilityPercent
+ * @property {string | null} precipitationProbabilityPeriod
  */
 
 /**
@@ -57,6 +71,8 @@ const supportedConditions = new Set([
  *
  * @property {string | null} condition
  * @property {string | null} description
+ * @property {number | null} precipitationProbabilityPercent
+ * @property {string | null} precipitationProbabilityPeriod
  */
 
 /**
@@ -157,6 +173,7 @@ function validateForecastDocument(document, municipalityId) {
   const dailySummariesByDate = new Map();
   const eventsByDate = new Map();
   const forecastDates = new Set();
+  const precipitationProbabilityPeriods = [];
   for (const day of document) {
     if (!isForecastDay(day) || forecastDates.has(day.date)) {
       throw new Error("El documento de previsión no es válido");
@@ -167,8 +184,19 @@ function validateForecastDocument(document, municipalityId) {
       maximumTemperatureCelsius: day.summary.temp_max_c,
       condition: day.summary.state,
       description: day.summary.desc,
+      precipitationProbabilityPercent:
+        day.summary.precip_prob?.pct ?? null,
+      precipitationProbabilityPeriod:
+        day.summary.precip_prob?.period ?? null,
     });
     eventsByDate.set(day.date, day.events);
+    for (const probability of day.precip_probs ?? []) {
+      precipitationProbabilityPeriods.push({
+        date: day.date,
+        percent: probability.pct,
+        period: probability.period,
+      });
+    }
 
     for (const hourlyForecast of day.hours) {
       const key = forecastKey(day.date, hourlyForecast.hour);
@@ -179,11 +207,19 @@ function validateForecastDocument(document, municipalityId) {
         temperatureCelsius: hourlyForecast.temp_c,
         condition: hourlyForecast.state,
         description: hourlyForecast.desc,
+        precipitationMillimetres: hourlyForecast.precip_mm ?? null,
+        precipitationProbabilityPercent: null,
+        precipitationProbabilityPeriod: null,
       });
     }
   }
   if (forecastsByHour.size === 0) {
     throw new Error("El documento de previsión no contiene horas");
+  }
+
+  // Apply each source interval only after every potentially covered day exists.
+  for (const probability of precipitationProbabilityPeriods) {
+    applyHourlyPrecipitationProbability(forecastsByHour, probability);
   }
 
   return {
@@ -192,6 +228,39 @@ function validateForecastDocument(document, municipalityId) {
     dailySummariesByDate,
     eventsByDate,
   };
+}
+
+/**
+ * Repeat one source probability across its six covered hourly forecasts.
+ *
+ * @param {Map<string, CurrentConditions>} forecastsByHour
+ * @param {{date: string, percent: number, period: string}} probability
+ */
+function applyHourlyPrecipitationProbability(
+  forecastsByHour,
+  probability,
+) {
+  const { start } = precipitationPeriodParts(probability.period);
+  for (let offset = 0; offset < 6; offset += 1) {
+    const absoluteHour = start + offset;
+    const date = addForecastDays(
+      probability.date,
+      Math.floor(absoluteHour / 24),
+    );
+    const key = forecastKey(date, absoluteHour % 24);
+    const forecast = forecastsByHour.get(key);
+    if (forecast === undefined) {
+      continue;
+    }
+    if (forecast.precipitationProbabilityPercent !== null) {
+      throw new Error(
+        "El documento de previsión contiene probabilidades solapadas",
+      );
+    }
+
+    forecast.precipitationProbabilityPercent = probability.percent;
+    forecast.precipitationProbabilityPeriod = probability.period;
+  }
 }
 
 /**
@@ -276,6 +345,10 @@ function dailyForecastPeriodsFor(timeZone, dailySummariesByDate, now) {
         summary?.maximumTemperatureCelsius ?? null,
       condition: summary?.condition ?? null,
       description: summary?.description ?? null,
+      precipitationProbabilityPercent:
+        summary?.precipitationProbabilityPercent ?? null,
+      precipitationProbabilityPeriod:
+        summary?.precipitationProbabilityPeriod ?? null,
     };
   });
 }
@@ -1026,12 +1099,23 @@ function isForecastDay(value) {
     "events" in value &&
     Array.isArray(value.events) &&
     value.events.every(isForecastEvent) &&
+    (
+      !("precip_probs" in value) ||
+      Array.isArray(value.precip_probs) &&
+        value.precip_probs.every(isHourlyPrecipitationProbability)
+    ) &&
     "hours" in value &&
     Array.isArray(value.hours) &&
     value.hours.every(isForecastHour)
   ) {
     const eventKinds = new Set(value.events.map((event) => event.kind));
     if (eventKinds.size !== value.events.length) {
+      return false;
+    }
+    const probabilityPeriods = new Set(
+      (value.precip_probs ?? []).map((probability) => probability.period),
+    );
+    if (probabilityPeriods.size !== (value.precip_probs?.length ?? 0)) {
       return false;
     }
     const sunrise = value.events.find((event) => event.kind === "sunrise");
@@ -1072,6 +1156,11 @@ function isDailySummary(value) {
         typeof value.desc === "string" &&
         value.desc.trim() !== ""
       )
+    ) &&
+    (
+      !("precip_prob" in value) ||
+      value.precip_prob === null ||
+      isDailyPrecipitationProbability(value.precip_prob)
     )
   );
 }
@@ -1106,8 +1195,69 @@ function isForecastHour(value) {
     supportedConditions.has(value.state) &&
     "desc" in value &&
     typeof value.desc === "string" &&
-    value.desc.trim().length > 0
+    value.desc.trim().length > 0 &&
+    (
+      !("precip_mm" in value) ||
+      value.precip_mm === null ||
+      value.precip_mm === "trace" ||
+      (
+        typeof value.precip_mm === "number" &&
+        Number.isFinite(value.precip_mm) &&
+        value.precip_mm >= 0
+      )
+    )
   );
+}
+
+/** @param {unknown} value */
+function isHourlyPrecipitationProbability(value) {
+  if (!isPrecipitationProbability(value)) {
+    return false;
+  }
+
+  const { start, end } = precipitationPeriodParts(value.period);
+  return end <= 23 && (end + 24 - start) % 24 === 6;
+}
+
+/** @param {unknown} value */
+function isDailyPrecipitationProbability(value) {
+  return isPrecipitationProbability(value) &&
+    dailyPrecipitationProbabilityPeriods.has(value.period);
+}
+
+/** @param {unknown} value */
+function isPrecipitationProbability(value) {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "period" in value &&
+    typeof value.period === "string" &&
+    isPrecipitationPeriod(value.period) &&
+    "pct" in value &&
+    Number.isInteger(value.pct) &&
+    value.pct >= 0 &&
+    value.pct <= 100
+  );
+}
+
+/** @param {string} value */
+function isPrecipitationPeriod(value) {
+  const match = /^(\d{2})-(\d{2})$/u.exec(value);
+  if (match === null) {
+    return false;
+  }
+
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  return start <= 23 && end <= 24 && start !== end;
+}
+
+/** @param {string} period */
+function precipitationPeriodParts(period) {
+  return {
+    start: Number(period.slice(0, 2)),
+    end: Number(period.slice(3, 5)),
+  };
 }
 
 /** @param {string} value */
@@ -1215,7 +1365,12 @@ function currentConditionsAreEqual(left, right) {
       right !== null &&
       left.temperatureCelsius === right.temperatureCelsius &&
       left.condition === right.condition &&
-      left.description === right.description;
+      left.description === right.description &&
+      left.precipitationMillimetres === right.precipitationMillimetres &&
+      left.precipitationProbabilityPercent ===
+        right.precipitationProbabilityPercent &&
+      left.precipitationProbabilityPeriod ===
+        right.precipitationProbabilityPeriod;
 }
 
 function dailySummariesAreEqual(left, right) {
@@ -1227,7 +1382,11 @@ function dailySummariesAreEqual(left, right) {
       left.minimumTemperatureCelsius === right.minimumTemperatureCelsius &&
       left.maximumTemperatureCelsius === right.maximumTemperatureCelsius &&
       left.condition === right.condition &&
-      left.description === right.description
+      left.description === right.description &&
+      left.precipitationProbabilityPercent ===
+        right.precipitationProbabilityPercent &&
+      left.precipitationProbabilityPeriod ===
+        right.precipitationProbabilityPeriod
     )
   );
 }
@@ -1248,7 +1407,11 @@ function dailyForecastPeriodsAreEqual(left, right) {
         period.maximumTemperatureCelsius ===
           other.maximumTemperatureCelsius &&
         period.condition === other.condition &&
-        period.description === other.description;
+        period.description === other.description &&
+        period.precipitationProbabilityPercent ===
+          other.precipitationProbabilityPercent &&
+        period.precipitationProbabilityPeriod ===
+          other.precipitationProbabilityPeriod;
     });
 }
 

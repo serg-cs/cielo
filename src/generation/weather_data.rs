@@ -11,7 +11,8 @@ use tracing::warn;
 
 use crate::aemet::{
     AemetClient, AemetWeatherData, DailyForecast, DailySummary, MunicipalityDailyForecast,
-    MunicipalityForecast, WeatherCondition, validate_municipality_id,
+    MunicipalityForecast, PrecipitationAmount, PrecipitationProbability, WeatherCondition,
+    validate_municipality_id,
 };
 
 use super::GENERATOR_IDENTITY;
@@ -63,6 +64,7 @@ struct ForecastDayDocument<'a> {
     date: &'a str,
     summary: ForecastSummaryDocument<'a>,
     events: Vec<ForecastEventDocument<'a>>,
+    precip_probs: Vec<ForecastProbabilityDocument<'a>>,
     hours: Vec<ForecastHourDocument<'a>>,
 }
 
@@ -73,6 +75,7 @@ struct ForecastSummaryDocument<'a> {
 
     state: Option<WeatherCondition>,
     desc: Option<&'a str>,
+    precip_prob: Option<ForecastProbabilityDocument<'a>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +98,13 @@ struct ForecastHourDocument<'a> {
     temp_c: i16,
     state: WeatherCondition,
     desc: &'a str,
+    precip_mm: Option<PrecipitationAmount>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+struct ForecastProbabilityDocument<'a> {
+    period: &'a str,
+    pct: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -400,6 +410,11 @@ fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
                 temp_max_c: day.summary.maximum_temperature_celsius,
                 state: day.summary.condition,
                 desc: day.summary.description.as_deref(),
+                precip_prob: day
+                    .summary
+                    .precipitation_probability
+                    .as_ref()
+                    .map(forecast_probability),
             },
             events: day.hourly.as_ref().map_or_else(Vec::new, |hourly| {
                 vec![
@@ -413,6 +428,13 @@ fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
                     },
                 ]
             }),
+            precip_probs: day.hourly.as_ref().map_or_else(Vec::new, |hourly| {
+                hourly
+                    .precipitation_probabilities
+                    .iter()
+                    .map(forecast_probability)
+                    .collect()
+            }),
             hours: day
                 .hourly
                 .as_ref()
@@ -424,10 +446,18 @@ fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
                     temp_c: forecast.temperature_celsius,
                     state: forecast.condition,
                     desc: &forecast.description,
+                    precip_mm: forecast.precipitation_amount,
                 })
                 .collect(),
         })
         .collect()
+}
+
+fn forecast_probability(probability: &PrecipitationProbability) -> ForecastProbabilityDocument<'_> {
+    ForecastProbabilityDocument {
+        period: &probability.period,
+        pct: probability.percent,
+    }
 }
 
 fn forecast_bundle_path(municipality_id: &str) -> Result<PathBuf> {

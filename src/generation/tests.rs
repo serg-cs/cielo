@@ -6,7 +6,7 @@ use std::{
 
 use crate::aemet::{
     AemetWeatherData, DailyForecast, DailySummary, HourlyForecast, MunicipalityDailyForecast,
-    MunicipalityForecast, WeatherCondition,
+    MunicipalityForecast, PrecipitationAmount, PrecipitationProbability, WeatherCondition,
 };
 use html5ever::{parse_document, tendril::TendrilSink};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
@@ -633,13 +633,18 @@ fn writes_readable_weather_data_files() {
     assert_eq!(forecast[0]["summary"]["temp_max_c"], 26);
     assert_eq!(forecast[0]["summary"]["state"], "cloud-sun");
     assert_eq!(forecast[0]["summary"]["desc"], "Intervalos nubosos");
+    assert_eq!(forecast[0]["summary"]["precip_prob"]["period"], "00-24");
+    assert_eq!(forecast[0]["summary"]["precip_prob"]["pct"], 45);
     assert_eq!(forecast[0]["events"][0]["kind"], "sunrise");
     assert_eq!(forecast[0]["events"][0]["time"], "07:10");
     assert_eq!(forecast[0]["events"][1]["kind"], "sunset");
     assert_eq!(forecast[0]["events"][1]["time"], "20:55");
+    assert_eq!(forecast[0]["precip_probs"][0]["period"], "08-14");
+    assert_eq!(forecast[0]["precip_probs"][0]["pct"], 60);
     assert_eq!(forecast[0]["hours"][0]["temp_c"], 24);
     assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
     assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
+    assert_eq!(forecast[0]["hours"][0]["precip_mm"], "trace");
 
     // Generated JSON has no formatting-only whitespace.
     for path in [
@@ -663,6 +668,7 @@ fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
         maximum_temperature_celsius: 25,
         condition: None,
         description: None,
+        precipitation_probability: None,
     });
     let snapshot = build_snapshot(source_data).expect("snapshot should build");
     let mut statistics = WeatherDataStatistics::default();
@@ -681,7 +687,9 @@ fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
     assert_eq!(later_day["summary"]["temp_max_c"], 25);
     assert_eq!(later_day["summary"]["state"], serde_json::Value::Null);
     assert_eq!(later_day["summary"]["desc"], serde_json::Value::Null);
+    assert_eq!(later_day["summary"]["precip_prob"], serde_json::Value::Null);
     assert_eq!(later_day["events"], serde_json::json!([]));
+    assert_eq!(later_day["precip_probs"], serde_json::json!([]));
     assert_eq!(later_day["hours"], serde_json::json!([]));
 }
 
@@ -998,6 +1006,7 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "hourly-scroll",
         "hourly-hour",
         "hourly-condition-icon",
+        "hourly-precipitation-probability",
         "hourly-temperature",
         "daily-scroll",
         "daily-weekday",
@@ -1005,6 +1014,9 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "daily-weekday-name",
         "daily-date",
         "daily-condition-icon",
+        "daily-precipitation-probability-cell",
+        "daily-precipitation-probability-description",
+        "daily-precipitation-probability",
         "daily-row-extrema",
         "municipality-name",
         "municipality-province",
@@ -1115,6 +1127,10 @@ fn sample_daily_forecast(id: &str) -> MunicipalityDailyForecast {
             maximum_temperature_celsius: 26,
             condition: Some(WeatherCondition::CloudSun),
             description: Some("Intervalos nubosos".to_owned()),
+            precipitation_probability: Some(PrecipitationProbability {
+                period: "00-24".to_owned(),
+                percent: 45,
+            }),
         }],
     }
 }
@@ -1134,11 +1150,16 @@ fn sample_forecast(id: &str) -> MunicipalityForecast {
             date: "2026-07-25".to_owned(),
             sunrise: "07:10".to_owned(),
             sunset: "20:55".to_owned(),
+            precipitation_probabilities: vec![PrecipitationProbability {
+                period: "08-14".to_owned(),
+                percent: 60,
+            }],
             hourly_forecasts: vec![HourlyForecast {
                 hour: 10,
                 temperature_celsius: 24,
                 condition: WeatherCondition::CloudSun,
                 description: "Intervalos nubosos".to_owned(),
+                precipitation_amount: Some(PrecipitationAmount::Trace),
             }],
         }],
     }

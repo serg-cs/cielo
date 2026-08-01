@@ -467,6 +467,10 @@ export class ForecastController {
         element.querySelector(".hourly-temperature"),
         HTMLElement,
       ),
+      precipitationProbability: requiredElement(
+        element.querySelector(".hourly-precipitation-probability"),
+        HTMLElement,
+      ),
     };
   }
 
@@ -509,6 +513,16 @@ export class ForecastController {
       ),
       maximumTemperature: requiredElement(
         element.querySelector(".daily-maximum-temperature"),
+        HTMLElement,
+      ),
+      precipitationProbability: requiredElement(
+        element.querySelector(".daily-precipitation-probability"),
+        HTMLElement,
+      ),
+      precipitationProbabilityDescription: requiredElement(
+        element.querySelector(
+          ".daily-precipitation-probability-description",
+        ),
         HTMLElement,
       ),
     };
@@ -573,8 +587,18 @@ export class ForecastController {
     );
 
     let forecastIndex = 0;
-    for (const [index, { element, hour, icon, temperature }] of
-      this.#hourlyItems.entries()) {
+    for (
+      const [
+        index,
+        {
+          element,
+          hour,
+          icon,
+          temperature,
+          precipitationProbability,
+        },
+      ] of this.#hourlyItems.entries()
+    ) {
       const period = this.#hourlyForecastPeriods[index];
       if (period === undefined) {
         continue;
@@ -596,12 +620,18 @@ export class ForecastController {
         temperature.textContent = period.forecast === null
           ? "—"
           : `${period.forecast.temperatureCelsius}°`;
+        const probabilityText =
+          formatVisiblePrecipitationProbability(period.forecast);
+        precipitationProbability.textContent = probabilityText;
+        element.dataset.hasPrecipitation = String(probabilityText !== "");
         setDynamicIcon(icon, period.forecast?.condition ?? null);
         continue;
       }
 
       hour.textContent = displaySolarTime(period.time);
       temperature.textContent = solarEventLabel(period.kind);
+      precipitationProbability.textContent = "";
+      element.dataset.hasPrecipitation = "false";
       setDynamicIcon(icon, period.kind);
     }
 
@@ -655,6 +685,13 @@ export class ForecastController {
         "Máxima",
         period.maximumTemperatureCelsius,
       );
+      item.precipitationProbability.textContent =
+        period.precipitationProbabilityPercent !== null &&
+          period.precipitationProbabilityPercent > 0
+          ? `${period.precipitationProbabilityPercent}%`
+          : "";
+      item.precipitationProbabilityDescription.textContent =
+        dailyPrecipitationProbabilityLabel(period);
     }
   }
 
@@ -886,6 +923,13 @@ function dailyTemperatureLabel(label, temperatureCelsius) {
     : `${label}: ${temperatureCelsius} grados Celsius`;
 }
 
+function formatVisiblePrecipitationProbability(forecast) {
+  const percent = forecast?.precipitationProbabilityPercent;
+  return percent !== null && percent !== undefined && percent > 0
+    ? `${percent}%`
+    : "";
+}
+
 function formatHourlyForecastLabel(period, isCurrent) {
   if (period.kind !== "forecast") {
     return `${solarEventLabel(period.kind)} a las ${displaySolarTime(period.time)}`;
@@ -897,7 +941,57 @@ function formatHourlyForecastLabel(period, isCurrent) {
     return `${hourLabel}. Previsión no disponible`;
   }
 
-  return `${hourLabel}. ${period.forecast.temperatureCelsius} grados Celsius. ${period.forecast.description}`;
+  const precipitation =
+    hourlyPrecipitationProbabilityLabel(period.forecast);
+  return `${hourLabel}. ${period.forecast.temperatureCelsius} grados Celsius. ` +
+    `${period.forecast.description}${precipitation}`;
+}
+
+function hourlyPrecipitationProbabilityLabel(forecast) {
+  if (
+    forecast.precipitationProbabilityPercent !== null &&
+    forecast.precipitationProbabilityPeriod !== null
+  ) {
+    return `. Probabilidad de precipitación: ${
+      forecast.precipitationProbabilityPercent
+    } por ciento ${precipitationPeriodLabel(
+      forecast.precipitationProbabilityPeriod,
+    )}`;
+  }
+
+  return "";
+}
+
+function dailyPrecipitationProbabilityLabel(period) {
+  if (
+    period.precipitationProbabilityPercent === null ||
+    period.precipitationProbabilityPeriod === null
+  ) {
+    return "";
+  }
+
+  if (period.precipitationProbabilityPeriod === "00-24") {
+    return "Probabilidad de precipitación durante todo el día: " +
+      `${period.precipitationProbabilityPercent} por ciento`;
+  }
+
+  const scope = period.isToday ? "para el resto del día" : "durante el día";
+  return `Probabilidad de precipitación ${scope}: ${
+    period.precipitationProbabilityPercent
+  } por ciento, ${precipitationPeriodLabel(
+    period.precipitationProbabilityPeriod,
+  )}`;
+}
+
+function precipitationPeriodLabel(period) {
+  if (period === "00-24") {
+    return "durante todo el día";
+  }
+
+  const start = Number(period.slice(0, 2));
+  const end = Number(period.slice(3, 5));
+  const nextDay = end <= start ? " del día siguiente" : "";
+  return `entre las ${start} y las ${end} horas${nextDay}`;
 }
 
 function displaySolarTime(time) {

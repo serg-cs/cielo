@@ -11,7 +11,7 @@ pub(crate) use client::AemetClient;
 pub(crate) use models::HourlyForecast;
 pub(crate) use models::{
     AemetWeatherData, DailyForecast, DailySummary, MunicipalityDailyForecast, MunicipalityForecast,
-    WeatherCondition,
+    PrecipitationAmount, PrecipitationProbability, WeatherCondition,
 };
 pub(crate) use normalization::validate_municipality_id;
 

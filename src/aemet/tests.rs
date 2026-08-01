@@ -81,18 +81,21 @@ fn parses_and_orders_forecast_temperatures() {
                 date: "2026-07-19".to_owned(),
                 sunrise: "06:54".to_owned(),
                 sunset: "21:43".to_owned(),
+                precipitation_probabilities: vec![],
                 hourly_forecasts: vec![
                     HourlyForecast {
                         hour: 10,
                         temperature_celsius: 27,
                         condition: WeatherCondition::CloudSun,
                         description: "Intervalos nubosos".to_owned(),
+                        precipitation_amount: None,
                     },
                     HourlyForecast {
                         hour: 11,
                         temperature_celsius: 29,
                         condition: WeatherCondition::Moon,
                         description: "Despejado".to_owned(),
+                        precipitation_amount: None,
                     },
                 ],
             },
@@ -100,14 +103,106 @@ fn parses_and_orders_forecast_temperatures() {
                 date: "2026-07-20".to_owned(),
                 sunrise: "06:55".to_owned(),
                 sunset: "21:42".to_owned(),
+                precipitation_probabilities: vec![],
                 hourly_forecasts: vec![HourlyForecast {
                     hour: 0,
                     temperature_celsius: 21,
                     condition: WeatherCondition::CloudDrizzle,
                     description: "Lluvia débil".to_owned(),
+                    precipitation_amount: None,
                 }],
             },
         ]
+    );
+}
+
+#[test]
+fn parses_hourly_precipitation_amounts_and_probability_periods() {
+    let archive = forecast_archive(
+        "localidad_h_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-19T08:00:00",
+                "nombre": "Madrid",
+                "provincia": "Madrid",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-19",
+                        "orto": "06:54",
+                        "ocaso": "21:43",
+                        "estado_cielo": {
+                            "periodo": "10",
+                            "valor": "24",
+                            "descripcion": "Lluvia débil"
+                        },
+                        "temperatura": [
+                            {"periodo": "10", "valor": "20"},
+                            {"periodo": "11", "valor": "21"}
+                        ],
+                        "precipitacion": [
+                            {"periodo": "10", "valor": "Ip"},
+                            {"periodo": "11", "valor": 0.4}
+                        ],
+                        "prob_precipitacion": {
+                            "periodo": "0814",
+                            "valor": "60"
+                        }
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let forecasts = parse_forecast_archive(&archive).expect("archive should parse");
+    let day = &forecasts[0].daily_forecasts[0];
+
+    assert_eq!(
+        day.precipitation_probabilities,
+        vec![PrecipitationProbability {
+            period: "08-14".to_owned(),
+            percent: 60,
+        }]
+    );
+    assert_eq!(
+        day.hourly_forecasts[0].precipitation_amount,
+        Some(PrecipitationAmount::Trace)
+    );
+    assert_eq!(
+        day.hourly_forecasts[1].precipitation_amount,
+        Some(PrecipitationAmount::MeasuredTenthsOfMillimetre(4))
+    );
+}
+
+#[test]
+fn rejects_invalid_precipitation_values_and_periods() {
+    assert!(
+        normalize_single_day_with_precipitation(
+            &serde_json::json!({"periodo": "10", "valor": "-0.1"}),
+            &serde_json::json!([]),
+        )
+        .is_err()
+    );
+    assert!(
+        normalize_single_day_with_precipitation(
+            &serde_json::json!({"periodo": "10", "valor": "0.12"}),
+            &serde_json::json!([]),
+        )
+        .is_err()
+    );
+    assert!(
+        normalize_single_day_with_precipitation(
+            &serde_json::json!([]),
+            &serde_json::json!({"periodo": "0814", "valor": 101}),
+        )
+        .is_err()
+    );
+    assert!(
+        normalize_single_day_with_precipitation(
+            &serde_json::json!([]),
+            &serde_json::json!({"periodo": "0815", "valor": 50}),
+        )
+        .is_err()
     );
 }
 
@@ -126,13 +221,11 @@ fn parses_and_orders_daily_temperature_extrema() {
                             "estado_cielo": [
                                 {
                                     "periodo": "12-24",
-                                    "valor": "11",
-                                    "descripcion": "Despejado"
+                                    "valor": "11", "descripcion": "Despejado"
                                 },
                                 {
                                     "periodo": "00-24",
-                                    "valor": "24",
-                                    "descripcion": "  Lluvia dÃ©bil  "
+                                    "valor": "24", "descripcion": "  Lluvia dÃ©bil  "
                                 }
                             ],
                             "temperatura": {"minima": 22, "maxima": 37}
@@ -176,13 +269,10 @@ fn parses_and_orders_daily_temperature_extrema() {
             }
         }"#,
     );
-
-    let forecasts = parse_daily_forecast_archive(&archive).expect("daily archive should parse");
-
-    assert_eq!(forecasts.len(), 1);
-    assert_eq!(forecasts[0].id, "28079");
+    let summaries =
+        &parse_daily_forecast_archive(&archive).expect("daily archive should parse")[0].summaries;
     assert_eq!(
-        forecasts[0].summaries,
+        *summaries,
         vec![
             DailySummary {
                 date: "2026-07-31".to_owned(),
@@ -190,6 +280,7 @@ fn parses_and_orders_daily_temperature_extrema() {
                 maximum_temperature_celsius: 36,
                 condition: Some(WeatherCondition::Sun),
                 description: Some("Despejado".to_owned()),
+                precipitation_probability: None,
             },
             DailySummary {
                 date: "2026-08-01".to_owned(),
@@ -197,6 +288,7 @@ fn parses_and_orders_daily_temperature_extrema() {
                 maximum_temperature_celsius: 37,
                 condition: Some(WeatherCondition::CloudDrizzle),
                 description: Some("Lluvia débil".to_owned()),
+                precipitation_probability: None,
             },
             DailySummary {
                 date: "2026-08-02".to_owned(),
@@ -204,6 +296,7 @@ fn parses_and_orders_daily_temperature_extrema() {
                 maximum_temperature_celsius: 35,
                 condition: Some(WeatherCondition::CloudSun),
                 description: Some("Intervalos nubosos".to_owned()),
+                precipitation_probability: None,
             },
             DailySummary {
                 date: "2026-08-03".to_owned(),
@@ -211,7 +304,72 @@ fn parses_and_orders_daily_temperature_extrema() {
                 maximum_temperature_celsius: 34,
                 condition: None,
                 description: None,
+                precipitation_probability: None,
             },
+        ]
+    );
+}
+
+#[test]
+fn selects_daily_whole_day_and_current_remaining_probabilities() {
+    let archive = forecast_archive(
+        "localidad_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-31T08:00:00",
+                "prediccion": {
+                    "dia": [
+                        {
+                            "fecha": "2026-07-31",
+                            "prob_precipitacion": [
+                                {"periodo": "00-24", "valor": null},
+                                {"periodo": "00-12", "valor": ""},
+                                {"periodo": "12-24", "valor": "30"}
+                            ],
+                            "temperatura": {"minima": 25, "maxima": 36}
+                        },
+                        {
+                            "fecha": "2026-08-01",
+                            "prob_precipitacion": {
+                                "periodo": "00-24",
+                                "valor": 70
+                            },
+                            "temperatura": {"minima": 22, "maxima": 37}
+                        },
+                        {
+                            "fecha": "2026-08-02",
+                            "prob_precipitacion": "20",
+                            "temperatura": {"minima": 21, "maxima": 35}
+                        }
+                    ]
+                }
+            }
+        }"#,
+    );
+
+    let forecasts = parse_daily_forecast_archive(&archive).expect("daily archive should parse");
+    let probabilities = forecasts[0]
+        .summaries
+        .iter()
+        .map(|summary| summary.precipitation_probability.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        probabilities,
+        vec![
+            Some(PrecipitationProbability {
+                period: "12-24".to_owned(),
+                percent: 30,
+            }),
+            Some(PrecipitationProbability {
+                period: "00-24".to_owned(),
+                percent: 70,
+            }),
+            Some(PrecipitationProbability {
+                period: "00-24".to_owned(),
+                percent: 20,
+            }),
         ]
     );
 }
@@ -371,11 +529,13 @@ fn normalizes_scalar_sky_state_shape() {
             date: "2026-07-19".to_owned(),
             sunrise: "06:54".to_owned(),
             sunset: "21:43".to_owned(),
+            precipitation_probabilities: vec![],
             hourly_forecasts: vec![HourlyForecast {
                 hour: 10,
                 temperature_celsius: 27,
                 condition: WeatherCondition::Sun,
                 description: "Despejado".to_owned(),
+                precipitation_amount: None,
             }],
         }]
     );
@@ -1153,6 +1313,37 @@ fn normalize_single_day_with_solar_times(
                     "ocaso": sunset,
                     "estado_cielo": sky_states,
                     "temperatura": temperatures
+                }]
+            }
+        }
+    }))
+    .expect("test forecast should deserialize");
+    normalize_forecast(document.root, "28079")
+}
+
+fn normalize_single_day_with_precipitation(
+    precipitation_amounts: &serde_json::Value,
+    precipitation_probabilities: &serde_json::Value,
+) -> Result<Option<MunicipalityForecast>> {
+    let document = serde_json::from_value::<ForecastDocument>(serde_json::json!({
+        "root": {
+            "id": "28079",
+            "elaborado": "2026-07-19T08:00:00",
+            "nombre": "Madrid",
+            "provincia": "Madrid",
+            "prediccion": {
+                "dia": [{
+                    "fecha": "2026-07-19",
+                    "orto": "06:54",
+                    "ocaso": "21:43",
+                    "estado_cielo": {
+                        "periodo": "10",
+                        "valor": "11",
+                        "descripcion": "Despejado"
+                    },
+                    "temperatura": {"periodo": "10", "valor": "27"},
+                    "precipitacion": precipitation_amounts,
+                    "prob_precipitacion": precipitation_probabilities
                 }]
             }
         }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// Complete source data needed to generate one weather-data output.
 #[derive(Debug)]
@@ -37,6 +37,7 @@ pub(crate) struct DailySummary {
 
     pub(crate) condition: Option<WeatherCondition>,
     pub(crate) description: Option<String>,
+    pub(crate) precipitation_probability: Option<PrecipitationProbability>,
 }
 
 /// Solar times and hourly conditions for one local forecast day.
@@ -46,6 +47,7 @@ pub(crate) struct DailyForecast {
     pub(crate) sunrise: String,
     pub(crate) sunset: String,
     pub(crate) hourly_forecasts: Vec<HourlyForecast>,
+    pub(crate) precipitation_probabilities: Vec<PrecipitationProbability>,
 }
 
 /// Conditions and temperature for one local forecast hour.
@@ -55,6 +57,38 @@ pub(crate) struct HourlyForecast {
     pub(crate) temperature_celsius: i16,
     pub(crate) condition: WeatherCondition,
     pub(crate) description: String,
+    pub(crate) precipitation_amount: Option<PrecipitationAmount>,
+}
+
+/// Measurable or trace precipitation accumulated during one forecast hour.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrecipitationAmount {
+    MeasuredTenthsOfMillimetre(u16),
+    Trace,
+}
+
+impl Serialize for PrecipitationAmount {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::MeasuredTenthsOfMillimetre(tenths) if tenths % 10 == 0 => {
+                serializer.serialize_u16(tenths / 10)
+            }
+            Self::MeasuredTenthsOfMillimetre(tenths) => {
+                serializer.serialize_f64(f64::from(*tenths) / 10.0)
+            }
+            Self::Trace => serializer.serialize_str("trace"),
+        }
+    }
+}
+
+/// Probability of precipitation during one normalized local-hour interval.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PrecipitationProbability {
+    pub(crate) period: String,
+    pub(crate) percent: u8,
 }
 
 /// Supported visual condition derived from an AEMET condition code.

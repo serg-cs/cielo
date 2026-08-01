@@ -11,7 +11,7 @@ use tracing::warn;
 use super::decoding::{decode_iso_8859_15, repair_iso_8859_15_mojibake};
 use super::models::{
     DailyForecast, DailySummary, HourlyForecast, MunicipalityDailyForecast, MunicipalityForecast,
-    WeatherCondition,
+    PrecipitationAmount, PrecipitationProbability, WeatherCondition,
 };
 
 const MAX_ARCHIVE_ENTRY_SIZE: u64 = 1024 * 1024;
@@ -76,6 +76,12 @@ struct DailySourceDay {
         deserialize_with = "deserialize_one_or_many"
     )]
     sky_states: Vec<DailyForecastSkyState>,
+    #[serde(
+        default,
+        rename = "prob_precipitacion",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    precipitation_probabilities: Vec<ForecastPeriodValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +135,18 @@ struct ForecastDay {
         deserialize_with = "deserialize_one_or_many"
     )]
     temperatures: Vec<ForecastTemperature>,
+    #[serde(
+        default,
+        rename = "precipitacion",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    precipitation_amounts: Vec<ForecastPeriodValue>,
+    #[serde(
+        default,
+        rename = "prob_precipitacion",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    precipitation_probabilities: Vec<ForecastPeriodValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +165,45 @@ struct ForecastSkyState {
     code: String,
     #[serde(rename = "descripcion")]
     description: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(from = "ForecastPeriodValueSource")]
+struct ForecastPeriodValue {
+    period: Option<String>,
+    value: Option<SourceValue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ForecastPeriodValueSource {
+    Detailed {
+        #[serde(default, rename = "periodo")]
+        period: Option<String>,
+        #[serde(default, rename = "valor")]
+        value: Option<SourceValue>,
+    },
+    Unperioded(SourceValue),
+}
+
+impl From<ForecastPeriodValueSource> for ForecastPeriodValue {
+    fn from(source: ForecastPeriodValueSource) -> Self {
+        match source {
+            ForecastPeriodValueSource::Detailed { period, value } => Self { period, value },
+            ForecastPeriodValueSource::Unperioded(value) => Self {
+                period: None,
+                value: Some(value),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SourceValue {
+    Integer(i64),
+    Decimal(f64),
+    Text(String),
 }
 
 struct NormalizedCondition {
@@ -348,19 +405,25 @@ fn normalize_daily_forecast(
     // Normalize daily values into a stable date index before publishing them.
     let mut summaries = BTreeMap::new();
     for day in root.prediction.days {
-        validate_date(&day.date)?;
-        let condition = select_daily_condition(
-            day.sky_states,
-            root.generated_at.starts_with(&day.date),
+        let DailySourceDay {
+            date,
+            temperature,
+            sky_states,
+            precipitation_probabilities,
+        } = day;
+        validate_date(&date)?;
+        let is_current_day = root.generated_at.starts_with(&date);
+        let condition = select_daily_condition(sky_states, is_current_day, &root.id)?;
+        let precipitation_probability = select_daily_precipitation_probability(
+            precipitation_probabilities,
+            is_current_day,
             &root.id,
         )?;
-        let minimum_temperature_celsius = day
-            .temperature
+        let minimum_temperature_celsius = temperature
             .minimum
             .parse_i16()
             .with_context(|| format!("invalid minimum temperature in forecast {}", root.id))?;
-        let maximum_temperature_celsius = day
-            .temperature
+        let maximum_temperature_celsius = temperature
             .maximum
             .parse_i16()
             .with_context(|| format!("invalid maximum temperature in forecast {}", root.id))?;
@@ -368,17 +431,18 @@ fn normalize_daily_forecast(
             bail!(
                 "daily forecast {} has a minimum temperature above its maximum on {}",
                 root.id,
-                day.date
+                date
             );
         }
         let summary = DailySummary {
-            date: day.date.clone(),
+            date: date.clone(),
             minimum_temperature_celsius,
             maximum_temperature_celsius,
             condition: condition.as_ref().map(|value| value.condition),
             description: condition.map(|value| value.description),
+            precipitation_probability,
         };
-        if summaries.insert(day.date, summary).is_some() {
+        if summaries.insert(date, summary).is_some() {
             bail!("daily forecast {} contains duplicate days", root.id);
         }
     }
@@ -456,6 +520,89 @@ fn select_daily_condition(
     normalize_daily_condition(selected, municipality_id)
 }
 
+fn select_daily_precipitation_probability(
+    values: Vec<ForecastPeriodValue>,
+    allow_partial_fallback: bool,
+    municipality_id: &str,
+) -> Result<Option<PrecipitationProbability>> {
+    let mut whole_day = None;
+    let mut unperioded = None;
+    let mut seen_periods = HashSet::new();
+    let mut saw_unperioded = false;
+    let mut partial = Vec::new();
+
+    // Prefer a real whole-day value and retain a current-day partial only as fallback.
+    for value in values {
+        let period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .filter(|period| !period.is_empty());
+        if let Some(period) = period {
+            if !seen_periods.insert(period.to_owned()) {
+                bail!(
+                    "daily forecast {municipality_id} contains duplicate {period} precipitation probabilities"
+                );
+            }
+        } else if saw_unperioded {
+            bail!(
+                "daily forecast {municipality_id} contains duplicate unperioded precipitation probabilities"
+            );
+        } else {
+            saw_unperioded = true;
+        }
+
+        let percent = normalize_probability_percent(value.value, municipality_id)?;
+        match period {
+            Some("00-24") => {
+                whole_day = percent.map(|percent| PrecipitationProbability {
+                    period: "00-24".to_owned(),
+                    percent,
+                });
+            }
+            None => {
+                unperioded = percent.map(|percent| PrecipitationProbability {
+                    period: "00-24".to_owned(),
+                    percent,
+                });
+            }
+            Some(period) => {
+                let Some((duration, end_hour)) = daily_partial_period_rank(period) else {
+                    if percent.is_some() {
+                        bail!(
+                            "daily forecast {municipality_id} contains an invalid precipitation probability period: {period}"
+                        );
+                    }
+                    continue;
+                };
+                if let Some(percent) = percent {
+                    partial.push((
+                        duration,
+                        end_hour,
+                        PrecipitationProbability {
+                            period: period.to_owned(),
+                            percent,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    if whole_day.is_some() {
+        return Ok(whole_day);
+    }
+    if unperioded.is_some() {
+        return Ok(unperioded);
+    }
+    if !allow_partial_fallback {
+        return Ok(None);
+    }
+
+    partial.sort_by_key(|(duration, end_hour, _)| (*duration, *end_hour));
+    Ok(partial.pop().map(|(_, _, probability)| probability))
+}
+
 fn normalize_daily_condition(
     sky_state: Option<DailyForecastSkyState>,
     municipality_id: &str,
@@ -521,6 +668,146 @@ impl TemperatureValue {
     }
 }
 
+fn normalize_precipitation_amount(
+    value: Option<SourceValue>,
+    municipality_id: &str,
+) -> Result<Option<PrecipitationAmount>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let SourceValue::Text(text) = &value {
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(None);
+        }
+        if text.eq_ignore_ascii_case("Ip") {
+            return Ok(Some(PrecipitationAmount::Trace));
+        }
+    }
+
+    let tenths = value
+        .precipitation_tenths()
+        .with_context(|| format!("invalid precipitation amount in forecast {municipality_id}"))?;
+    Ok(Some(PrecipitationAmount::MeasuredTenthsOfMillimetre(
+        tenths,
+    )))
+}
+
+fn normalize_probability_percent(
+    value: Option<SourceValue>,
+    municipality_id: &str,
+) -> Result<Option<u8>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty_text() {
+        return Ok(None);
+    }
+
+    let percent = value.probability_percent().with_context(|| {
+        format!("invalid precipitation probability in forecast {municipality_id}")
+    })?;
+    if percent > 100 {
+        bail!("invalid precipitation probability in forecast {municipality_id}");
+    }
+    Ok(Some(percent))
+}
+
+fn normalize_hourly_precipitation_probabilities(
+    values: Vec<ForecastPeriodValue>,
+    municipality_id: &str,
+) -> Result<Vec<PrecipitationProbability>> {
+    let mut seen_periods = HashSet::new();
+    let mut probabilities = Vec::new();
+
+    for value in values {
+        let source_period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .context("hourly precipitation probability does not contain a period")?;
+        let period = normalize_hourly_probability_period(source_period, municipality_id)?;
+        if !seen_periods.insert(period.clone()) {
+            bail!(
+                "forecast {municipality_id} contains duplicate precipitation probability periods"
+            );
+        }
+        if let Some(percent) = normalize_probability_percent(value.value, municipality_id)? {
+            probabilities.push(PrecipitationProbability { period, percent });
+        }
+    }
+
+    probabilities.sort_by(|left, right| left.period.cmp(&right.period));
+    Ok(probabilities)
+}
+
+fn normalize_hourly_probability_period(period: &str, municipality_id: &str) -> Result<String> {
+    let valid_shape = period.len() == 4 && period.bytes().all(|byte| byte.is_ascii_digit());
+    if !valid_shape {
+        bail!(
+            "forecast {municipality_id} contains an invalid precipitation probability period: {period}"
+        );
+    }
+
+    let start = period[..2].parse::<u8>().with_context(|| {
+        format!("invalid precipitation probability period in forecast {municipality_id}")
+    })?;
+    let end = period[2..].parse::<u8>().with_context(|| {
+        format!("invalid precipitation probability period in forecast {municipality_id}")
+    })?;
+    let duration = (end + 24 - start) % 24;
+    if start > 23 || end > 23 || duration != 6 {
+        bail!(
+            "forecast {municipality_id} contains an invalid precipitation probability period: {period}"
+        );
+    }
+
+    Ok(format!("{start:02}-{end:02}"))
+}
+
+impl SourceValue {
+    fn precipitation_tenths(&self) -> Option<u16> {
+        match self {
+            Self::Integer(value) => u16::try_from(*value).ok()?.checked_mul(10),
+            Self::Decimal(value) if value.is_finite() => {
+                parse_precipitation_tenths(&value.to_string())
+            }
+            Self::Decimal(_) => None,
+            Self::Text(value) => parse_precipitation_tenths(value),
+        }
+    }
+
+    fn probability_percent(&self) -> Option<u8> {
+        match self {
+            Self::Integer(value) => u8::try_from(*value).ok(),
+            Self::Decimal(value) if value.is_finite() && value.fract() == 0.0 => {
+                value.to_string().parse().ok()
+            }
+            Self::Decimal(_) => None,
+            Self::Text(value) => value.trim().parse().ok(),
+        }
+    }
+
+    fn is_empty_text(&self) -> bool {
+        matches!(self, Self::Text(value) if value.trim().is_empty())
+    }
+}
+
+fn parse_precipitation_tenths(value: &str) -> Option<u16> {
+    let value = value.trim();
+    let (whole, fractional) = value.split_once('.').map_or((value, ""), |parts| parts);
+    let whole = whole.parse::<u16>().ok()?;
+    let fractional_tenth = match fractional.as_bytes() {
+        [] => 0,
+        [tenth, rest @ ..] if tenth.is_ascii_digit() && rest.iter().all(|digit| *digit == b'0') => {
+            u16::from(tenth - b'0')
+        }
+        _ => return None,
+    };
+
+    whole.checked_mul(10)?.checked_add(fractional_tenth)
+}
+
 pub(super) fn normalize_forecast(
     root: ForecastRoot,
     filename_id: &str,
@@ -539,6 +826,8 @@ pub(super) fn normalize_forecast(
     // Normalize conditions independently so source array order cannot affect joins.
     let mut conditions = BTreeMap::new();
     let mut daily_forecasts = BTreeMap::new();
+    let mut precipitation_amounts = BTreeMap::new();
+    let mut precipitation_amount_keys = HashSet::new();
     let mut temperature_values = Vec::new();
     for day in root.prediction.days {
         let ForecastDay {
@@ -547,44 +836,21 @@ pub(super) fn normalize_forecast(
             sunset,
             sky_states,
             temperatures,
+            precipitation_amounts: source_precipitation_amounts,
+            precipitation_probabilities,
         } = day;
-        insert_daily_forecast(&mut daily_forecasts, &root.id, &date, sunrise, sunset)?;
+        let precipitation_probabilities =
+            normalize_hourly_precipitation_probabilities(precipitation_probabilities, &root.id)?;
+        insert_daily_forecast(
+            &mut daily_forecasts,
+            &root.id,
+            &date,
+            sunrise,
+            sunset,
+            precipitation_probabilities,
+        )?;
 
-        for value in sky_states {
-            let hour = value
-                .hour
-                .parse::<u8>()
-                .with_context(|| format!("invalid condition hour in forecast {}", root.id))?;
-            if hour > 23 {
-                bail!("invalid condition hour in forecast {}: {hour}", root.id);
-            }
-
-            let code = value.code.trim();
-            if code.is_empty() {
-                bail!("empty condition code in forecast {}", root.id);
-            }
-            let condition = WeatherCondition::from_aemet_code(code).with_context(|| {
-                format!("unknown condition code in forecast {}: {code}", root.id)
-            })?;
-            let description = repair_iso_8859_15_mojibake(value.description.trim());
-            if description.is_empty() {
-                bail!("empty condition description in forecast {}", root.id);
-            }
-
-            let key = (date.clone(), hour);
-            if conditions
-                .insert(
-                    key,
-                    NormalizedCondition {
-                        condition,
-                        description,
-                    },
-                )
-                .is_some()
-            {
-                bail!("forecast {} contains duplicate condition hours", root.id);
-            }
-        }
+        insert_hourly_conditions(&mut conditions, sky_states, &date, &root.id)?;
 
         for value in temperatures {
             let hour = value
@@ -600,6 +866,14 @@ pub(super) fn normalize_forecast(
                 .with_context(|| format!("invalid temperature in forecast {}", root.id))?;
             temperature_values.push((date.clone(), hour, celsius));
         }
+
+        insert_hourly_precipitation_amounts(
+            &mut precipitation_amounts,
+            &mut precipitation_amount_keys,
+            source_precipitation_amounts,
+            &date,
+            &root.id,
+        )?;
     }
     if conditions.is_empty() {
         warn!(
@@ -613,8 +887,13 @@ pub(super) fn normalize_forecast(
         bail!("forecast {} does not contain temperatures", root.id);
     }
 
-    let daily_forecasts =
-        join_hourly_forecasts(daily_forecasts, &conditions, temperature_values, &root.id)?;
+    let daily_forecasts = join_hourly_forecasts(
+        daily_forecasts,
+        &conditions,
+        &precipitation_amounts,
+        temperature_values,
+        &root.id,
+    )?;
 
     Ok(Some(MunicipalityForecast {
         id: root.id,
@@ -625,9 +904,85 @@ pub(super) fn normalize_forecast(
     }))
 }
 
+fn insert_hourly_conditions(
+    conditions: &mut BTreeMap<(String, u8), NormalizedCondition>,
+    values: Vec<ForecastSkyState>,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    for value in values {
+        let hour = value
+            .hour
+            .parse::<u8>()
+            .with_context(|| format!("invalid condition hour in forecast {municipality_id}"))?;
+        if hour > 23 {
+            bail!("invalid condition hour in forecast {municipality_id}: {hour}");
+        }
+
+        let code = value.code.trim();
+        if code.is_empty() {
+            bail!("empty condition code in forecast {municipality_id}");
+        }
+        let condition = WeatherCondition::from_aemet_code(code).with_context(|| {
+            format!("unknown condition code in forecast {municipality_id}: {code}")
+        })?;
+        let description = repair_iso_8859_15_mojibake(value.description.trim());
+        if description.is_empty() {
+            bail!("empty condition description in forecast {municipality_id}");
+        }
+
+        let key = (date.to_owned(), hour);
+        if conditions
+            .insert(
+                key,
+                NormalizedCondition {
+                    condition,
+                    description,
+                },
+            )
+            .is_some()
+        {
+            bail!("forecast {municipality_id} contains duplicate condition hours");
+        }
+    }
+    Ok(())
+}
+
+fn insert_hourly_precipitation_amounts(
+    amounts: &mut BTreeMap<(String, u8), PrecipitationAmount>,
+    amount_keys: &mut HashSet<(String, u8)>,
+    values: Vec<ForecastPeriodValue>,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    for value in values {
+        let period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .context("hourly precipitation amount does not contain a period")?;
+        let hour = period
+            .parse::<u8>()
+            .with_context(|| format!("invalid precipitation hour in forecast {municipality_id}"))?;
+        if hour > 23 {
+            bail!("invalid precipitation hour in forecast {municipality_id}: {hour}");
+        }
+
+        let key = (date.to_owned(), hour);
+        if !amount_keys.insert(key.clone()) {
+            bail!("forecast {municipality_id} contains duplicate precipitation amount hours");
+        }
+        if let Some(amount) = normalize_precipitation_amount(value.value, municipality_id)? {
+            amounts.insert(key, amount);
+        }
+    }
+    Ok(())
+}
+
 fn join_hourly_forecasts(
     mut daily_forecasts: BTreeMap<String, DailyForecast>,
     conditions: &BTreeMap<(String, u8), NormalizedCondition>,
+    precipitation_amounts: &BTreeMap<(String, u8), PrecipitationAmount>,
     mut temperature_values: Vec<(String, u8, i16)>,
     municipality_id: &str,
 ) -> Result<Vec<DailyForecast>> {
@@ -652,6 +1007,7 @@ fn join_hourly_forecasts(
             temperature_celsius,
             condition: condition.condition,
             description: condition.description.clone(),
+            precipitation_amount: precipitation_amounts.get(&key).copied(),
         });
     }
 
@@ -667,6 +1023,7 @@ fn insert_daily_forecast(
     date: &str,
     sunrise: String,
     sunset: String,
+    precipitation_probabilities: Vec<PrecipitationProbability>,
 ) -> Result<()> {
     validate_date(date)?;
     validate_solar_time(&sunrise)
@@ -682,6 +1039,7 @@ fn insert_daily_forecast(
         sunrise,
         sunset,
         hourly_forecasts: Vec::new(),
+        precipitation_probabilities,
     };
     if daily_forecasts
         .insert(date.to_owned(), daily_forecast)
