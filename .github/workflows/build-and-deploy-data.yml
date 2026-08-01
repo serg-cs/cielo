@@ -15,7 +15,7 @@ on:
       DATA_BUCKET:
         required: true
   schedule:
-    - cron: "30 1,7,13,19 * * *"
+    - cron: "30 */3 * * *"
       timezone: Europe/Madrid
 
 permissions:
