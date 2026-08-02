@@ -26,6 +26,11 @@ import {
 } from "./dom.js";
 
 const navigationStateKey = "cielo";
+const applicationPageAnimationDurationMilliseconds = 480;
+const applicationPageSettleDelayMilliseconds = 120;
+const applicationPageRestTolerancePixels = 2;
+const locationsPageIndex = 0;
+const forecastPageIndex = 1;
 
 export class ApplicationController {
   #elements;
@@ -41,6 +46,10 @@ export class ApplicationController {
   #lastOpenedMunicipalityId = null;
   #catalogLoadInFlight = false;
   #catalogLoadFailed = false;
+  #applicationPageTargetIndex = null;
+  #applicationPageAnimationFrame = null;
+  #applicationPageSettleTimeout = null;
+  #applicationPageResizeFrame = null;
 
   constructor(root) {
     this.#elements = captureApplicationElements(root);
@@ -81,6 +90,7 @@ export class ApplicationController {
         },
       },
     );
+    this.#installNavigationInteractions();
     this.#installEventCoordination();
   }
 
@@ -112,6 +122,25 @@ export class ApplicationController {
       "forecaststatuschange",
       this.#handleForecastStatusChange,
     );
+  }
+
+  #installNavigationInteractions() {
+    this.#elements.root.addEventListener(
+      "scroll",
+      this.#handleApplicationPageScroll,
+      { passive: true },
+    );
+    this.#elements.root.addEventListener(
+      "pointerdown",
+      this.#handleApplicationPageInteraction,
+      { passive: true },
+    );
+    this.#elements.root.addEventListener(
+      "wheel",
+      this.#handleApplicationPageInteraction,
+      { passive: false },
+    );
+    window.addEventListener("resize", this.#handleApplicationPageResize);
   }
 
   async #initialize() {
@@ -217,7 +246,7 @@ export class ApplicationController {
       this.#savedMunicipalityIds.has(navigationState.municipalityId)
     ) {
       this.#rememberMunicipality(navigationState.municipalityId);
-      this.#showForecast(navigationState.municipalityId);
+      this.#showForecast(navigationState.municipalityId, "auto");
       return;
     }
 
@@ -234,7 +263,7 @@ export class ApplicationController {
 
     this.#pushForecastState(initialMunicipalityId);
     this.#rememberMunicipality(initialMunicipalityId);
-    this.#showForecast(initialMunicipalityId);
+    this.#showForecast(initialMunicipalityId, "auto");
   }
 
   #openMunicipality({ municipalityId, shouldSave }) {
@@ -255,10 +284,10 @@ export class ApplicationController {
       this.#savedMunicipalityIds;
     this.#pushForecastState(municipalityId);
     this.#rememberMunicipality(municipalityId);
-    this.#showForecast(municipalityId);
+    this.#showForecast(municipalityId, "smooth");
   }
 
-  #showForecast(municipalityId) {
+  #showForecast(municipalityId, behavior) {
     const municipality = this.#municipalitiesById.get(municipalityId);
     if (municipality === undefined) {
       return;
@@ -267,6 +296,10 @@ export class ApplicationController {
     this.#locationsController.closeSwipeRows();
     this.#selectedMunicipalityId = municipalityId;
     this.#setThemeColor("--cielo-color-forecast-background");
+    this.#elements.forecastView.inert = false;
+    this.#elements.forecastView.removeAttribute("aria-hidden");
+    this.#elements.locationsView.inert = true;
+    this.#elements.locationsView.setAttribute("aria-hidden", "true");
     this.#forecastController.show(
       municipality,
       this.#forecastStore.getCurrentConditions(municipalityId),
@@ -275,8 +308,7 @@ export class ApplicationController {
       this.#forecastStore.getDailyForecastPeriods(municipalityId),
       this.#forecastStore.getForecastStatus(municipalityId),
     );
-    this.#elements.locationsView.inert = true;
-    this.#elements.locationsView.setAttribute("aria-hidden", "true");
+    this.#scrollToApplicationPage(forecastPageIndex, behavior);
   }
 
   #requestForecastClose() {
@@ -295,13 +327,14 @@ export class ApplicationController {
 
   #showLocations() {
     if (this.#selectedMunicipalityId === null) {
+      this.#scrollToApplicationPage(locationsPageIndex, "auto");
       this.#elements.locationsView.inert = false;
       this.#elements.locationsView.removeAttribute("aria-hidden");
       this.#setThemeColor("--cielo-color-locations-background");
       return;
     }
 
-    this.#forecastController.dismiss();
+    this.#scrollToApplicationPage(locationsPageIndex, "smooth");
   }
 
   #removeMunicipality(municipalityId) {
@@ -354,10 +387,135 @@ export class ApplicationController {
     }
 
     this.#selectedMunicipalityId = null;
+    this.#elements.forecastView.inert = true;
+    this.#elements.forecastView.setAttribute("aria-hidden", "true");
     this.#elements.locationsView.inert = false;
     this.#elements.locationsView.removeAttribute("aria-hidden");
     this.#locationsController.restoreFocus(municipalityId);
     this.#setThemeColor("--cielo-color-locations-background");
+  }
+
+  #scrollToApplicationPage(pageIndex, behavior) {
+    const left = this.#elements.root.clientWidth * pageIndex;
+    this.#applicationPageTargetIndex = pageIndex;
+    if (
+      behavior === "auto" ||
+      reducedMotionIsPreferred() ||
+      Math.abs(this.#elements.root.scrollLeft - left) <=
+        applicationPageRestTolerancePixels
+    ) {
+      this.#cancelApplicationPageAnimation();
+      this.#elements.root.scrollTo({ left, behavior: "auto" });
+      this.#settleApplicationPage(pageIndex);
+      return;
+    }
+
+    this.#animateApplicationPage(left, pageIndex);
+  }
+
+  #animateApplicationPage(left, pageIndex) {
+    this.#cancelApplicationPageAnimation();
+    this.#elements.root.dataset.pageAnimating = "true";
+    const startLeft = this.#elements.root.scrollLeft;
+    const distance = left - startLeft;
+    const startTime = performance.now();
+
+    // Give button-driven navigation the same deliberate feel in every browser.
+    const animate = (time) => {
+      const progress = Math.min(
+        (time - startTime) / applicationPageAnimationDurationMilliseconds,
+        1,
+      );
+      this.#elements.root.scrollLeft =
+        startLeft + distance * easeInOutCubic(progress);
+      if (progress < 1) {
+        this.#applicationPageAnimationFrame =
+          window.requestAnimationFrame(animate);
+        return;
+      }
+
+      this.#applicationPageAnimationFrame = null;
+      this.#elements.root.scrollLeft = left;
+      delete this.#elements.root.dataset.pageAnimating;
+      this.#settleApplicationPage(pageIndex);
+    };
+    this.#applicationPageAnimationFrame = window.requestAnimationFrame(animate);
+  }
+
+  #cancelApplicationPageAnimation() {
+    if (this.#applicationPageAnimationFrame !== null) {
+      window.cancelAnimationFrame(this.#applicationPageAnimationFrame);
+      this.#applicationPageAnimationFrame = null;
+    }
+
+    delete this.#elements.root.dataset.pageAnimating;
+  }
+
+  #queueApplicationPageSettle() {
+    if (this.#applicationPageSettleTimeout !== null) {
+      window.clearTimeout(this.#applicationPageSettleTimeout);
+    }
+    this.#applicationPageSettleTimeout = window.setTimeout(() => {
+      this.#applicationPageSettleTimeout = null;
+      const pageIndex = this.#restingApplicationPageIndex();
+      if (pageIndex !== null) {
+        this.#settleApplicationPage(pageIndex);
+      }
+    }, applicationPageSettleDelayMilliseconds);
+  }
+
+  #restingApplicationPageIndex() {
+    const pageWidth = this.#elements.root.clientWidth;
+    if (pageWidth <= 0) {
+      return null;
+    }
+
+    const pageIndex = Math.round(this.#elements.root.scrollLeft / pageWidth);
+    const boundedPageIndex = Math.min(
+      Math.max(pageIndex, locationsPageIndex),
+      forecastPageIndex,
+    );
+    const restingLeft = pageWidth * boundedPageIndex;
+    return Math.abs(this.#elements.root.scrollLeft - restingLeft) <=
+        applicationPageRestTolerancePixels
+      ? boundedPageIndex
+      : null;
+  }
+
+  #settleApplicationPage(pageIndex) {
+    // Ignore intermediate snap points during programmatic navigation.
+    if (
+      this.#applicationPageTargetIndex !== null &&
+      this.#applicationPageTargetIndex !== pageIndex
+    ) {
+      return;
+    }
+    this.#applicationPageTargetIndex = null;
+
+    if (pageIndex === forecastPageIndex) {
+      this.#elements.forecastView.inert = false;
+      this.#elements.forecastView.removeAttribute("aria-hidden");
+      this.#elements.locationsView.inert = true;
+      this.#elements.locationsView.setAttribute("aria-hidden", "true");
+      this.#setThemeColor("--cielo-color-forecast-background");
+      return;
+    }
+
+    if (this.#selectedMunicipalityId === null) {
+      this.#elements.locationsView.inert = false;
+      this.#elements.locationsView.removeAttribute("aria-hidden");
+      this.#setThemeColor("--cielo-color-locations-background");
+      return;
+    }
+
+    // Commit touch-driven navigation only after the list has fully settled.
+    const navigationState = readNavigationState(window.history.state);
+    if (navigationState?.view === "forecast") {
+      this.#requestForecastClose();
+      return;
+    }
+
+    this.#forecastController.dismiss();
   }
 
   #rememberMunicipality(municipalityId) {
@@ -397,7 +555,7 @@ export class ApplicationController {
       this.#savedMunicipalityIds.has(navigationState.municipalityId)
     ) {
       this.#rememberMunicipality(navigationState.municipalityId);
-      this.#showForecast(navigationState.municipalityId);
+      this.#showForecast(navigationState.municipalityId, "smooth");
       return;
     }
 
@@ -405,6 +563,41 @@ export class ApplicationController {
       this.#replaceNavigationState({ view: "locations" });
     }
     this.#showLocations();
+  };
+
+  #handleApplicationPageScroll = () => {
+    this.#queueApplicationPageSettle();
+  };
+
+  #handleApplicationPageInteraction = (event) => {
+    if (this.#applicationPageAnimationFrame !== null) {
+      if (event.type === "wheel") {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    this.#applicationPageTargetIndex = null;
+  };
+
+  #handleApplicationPageResize = () => {
+    if (this.#applicationPageResizeFrame !== null) {
+      window.cancelAnimationFrame(this.#applicationPageResizeFrame);
+    }
+
+    this.#applicationPageResizeFrame = window.requestAnimationFrame(() => {
+      this.#applicationPageResizeFrame = null;
+      // Keep layout changes aligned with the navigation already in progress.
+      const navigationState = readNavigationState(window.history.state);
+      const historyPageIndex =
+        navigationState?.view === "forecast" &&
+          this.#selectedMunicipalityId !== null
+          ? forecastPageIndex
+          : locationsPageIndex;
+      const pageIndex =
+        this.#applicationPageTargetIndex ?? historyPageIndex;
+      this.#scrollToApplicationPage(pageIndex, "auto");
+    });
   };
 
   #handleCurrentConditionsChange = (event) => {
@@ -542,4 +735,14 @@ function withNavigationState(navigationState) {
     ? currentState
     : {};
   return { ...state, [navigationStateKey]: navigationState };
+}
+
+function reducedMotionIsPreferred() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function easeInOutCubic(progress) {
+  return progress < 0.5
+    ? 4 * progress ** 3
+    : 1 - (-2 * progress + 2) ** 3 / 2;
 }

@@ -3,10 +3,11 @@ import {
   setDynamicIcon,
 } from "./dom.js";
 
-const backSwipeEdgeWidth = 32;
-const backSwipeMinimumDistance = 64;
-const backSwipeDirectionRatio = 1.25;
 const pageSettleDelayMilliseconds = 120;
+const pageSwipeDirectionRatio = 1.25;
+const pageSwipeMinimumDistancePixels = 48;
+const pageSwipeMinimumFlickDistancePixels = 20;
+const pageSwipeMinimumVelocityPixelsPerMillisecond = 0.35;
 const weekdayFormatter = new Intl.DateTimeFormat("es-ES", {
   weekday: "short",
   timeZone: "UTC",
@@ -43,10 +44,12 @@ export class ForecastController {
   #resetHourlyScrollOnRender = false;
   #hourlyScrollResetFrame = null;
   #dailyScrollResetFrame = null;
-  #backSwipe = {
+  #pageSwipe = {
     touchId: null,
     startX: 0,
     startY: 0,
+    startTime: 0,
+    startPageIndex: 0,
   };
 
   constructor(root, { onCloseRequest, onClose }) {
@@ -76,7 +79,7 @@ export class ForecastController {
     this.#elements.titleText.textContent = municipality.name;
     this.#elements.title.setAttribute(
       "aria-label",
-      `Cambiar ubicación. Ubicación actual: ${municipality.name}, ${municipality.province}`,
+      `${municipality.name}, ${municipality.province}`,
     );
     this.#renderCurrentConditions();
     this.#renderHourlyForecast();
@@ -180,9 +183,6 @@ export class ForecastController {
   }
 
   #installInteractions() {
-    this.#elements.title.addEventListener("click", () => {
-      this.#requestClose();
-    });
     this.#elements.locationsButton.addEventListener("click", () => {
       this.#requestClose();
     });
@@ -191,29 +191,22 @@ export class ForecastController {
       this.#handlePageScroll,
       { passive: true },
     );
-    window.addEventListener("resize", this.#handleWindowResize);
-
-    // Capture edge touches before Safari starts native history navigation.
-    this.#elements.screen.addEventListener(
+    this.#elements.pageTrack.addEventListener(
       "touchstart",
-      this.#handleBackSwipeStart,
-      { passive: false },
+      this.#handlePageSwipeStart,
+      { passive: true },
     );
-    this.#elements.screen.addEventListener(
-      "touchmove",
-      this.#handleBackSwipeMove,
-      { passive: false },
-    );
-    this.#elements.screen.addEventListener(
+    this.#elements.pageTrack.addEventListener(
       "touchend",
-      this.#handleBackSwipeEnd,
+      this.#handlePageSwipeEnd,
       { passive: false },
     );
-    this.#elements.screen.addEventListener(
+    this.#elements.pageTrack.addEventListener(
       "touchcancel",
-      this.#handleBackSwipeCancel,
-      { passive: false },
+      this.#handlePageSwipeCancel,
+      { passive: true },
     );
+    window.addEventListener("resize", this.#handleWindowResize);
   }
 
   #installDocumentKeys() {
@@ -239,8 +232,8 @@ export class ForecastController {
         this.#pageIndex + direction,
         this.#elements.pages.length,
       );
+      event.preventDefault();
       if (nextIndex !== this.#pageIndex) {
-        event.preventDefault();
         this.#scrollToPage(nextIndex, "smooth");
       }
     }
@@ -265,6 +258,100 @@ export class ForecastController {
       this.#settlePage(pageIndex);
     }, pageSettleDelayMilliseconds);
   };
+
+  #handlePageSwipeStart = (event) => {
+    if (
+      this.#municipality === null ||
+      event.touches.length !== 1 ||
+      !(event.target instanceof Element) ||
+      event.target.closest(
+        "button, a[href], input, select, textarea, [contenteditable], .hourly-scroll",
+      ) !== null
+    ) {
+      this.#resetPageSwipe();
+      return;
+    }
+
+    const touch = event.touches[0];
+    if (touch === undefined) {
+      return;
+    }
+
+    const pageWidth = this.#elements.pageTrack.clientWidth;
+    this.#pageSwipe.touchId = touch.identifier;
+    this.#pageSwipe.startX = touch.clientX;
+    this.#pageSwipe.startY = touch.clientY;
+    this.#pageSwipe.startTime = event.timeStamp;
+    this.#pageSwipe.startPageIndex = pageWidth <= 0
+      ? this.#pageIndex
+      : clampPageIndex(
+        Math.round(this.#elements.pageTrack.scrollLeft / pageWidth),
+        this.#elements.pages.length,
+      );
+  };
+
+  #handlePageSwipeEnd = (event) => {
+    const touch = this.#pageSwipeTouch(event.changedTouches);
+    if (touch === null) {
+      return;
+    }
+
+    const horizontalDistance = touch.clientX - this.#pageSwipe.startX;
+    const horizontalMagnitude = Math.abs(horizontalDistance);
+    const verticalMagnitude = Math.abs(touch.clientY - this.#pageSwipe.startY);
+    const duration = Math.max(1, event.timeStamp - this.#pageSwipe.startTime);
+    const velocity = horizontalMagnitude / duration;
+    const startPageIndex = this.#pageSwipe.startPageIndex;
+    this.#resetPageSwipe();
+
+    const directionIsHorizontal =
+      horizontalMagnitude >= verticalMagnitude * pageSwipeDirectionRatio;
+    const distanceIsEnough =
+      horizontalMagnitude >= pageSwipeMinimumDistancePixels;
+    const flickIsEnough =
+      horizontalMagnitude >= pageSwipeMinimumFlickDistancePixels &&
+      velocity >= pageSwipeMinimumVelocityPixelsPerMillisecond;
+    if (
+      !directionIsHorizontal ||
+      (!distanceIsEnough && !flickIsEnough)
+    ) {
+      return;
+    }
+
+    const direction = horizontalDistance < 0 ? 1 : -1;
+    const targetPageIndex = clampPageIndex(
+      startPageIndex + direction,
+      this.#elements.pages.length,
+    );
+    if (targetPageIndex === startPageIndex) {
+      return;
+    }
+
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    this.#scrollToPage(targetPageIndex, "smooth");
+  };
+
+  #handlePageSwipeCancel = (event) => {
+    if (this.#pageSwipeTouch(event.changedTouches) !== null) {
+      this.#resetPageSwipe();
+    }
+  };
+
+  #pageSwipeTouch(touches) {
+    if (this.#pageSwipe.touchId === null) {
+      return null;
+    }
+
+    return Array.from(touches).find(
+      (touch) => touch.identifier === this.#pageSwipe.touchId,
+    ) ?? null;
+  }
+
+  #resetPageSwipe() {
+    this.#pageSwipe.touchId = null;
+  }
 
   #handleWindowResize = () => {
     if (this.#municipality === null) {
@@ -369,81 +456,6 @@ export class ForecastController {
       window.cancelAnimationFrame(this.#dailyScrollResetFrame);
       this.#dailyScrollResetFrame = null;
     }
-  }
-
-  #handleBackSwipeStart = (event) => {
-    if (
-      this.#municipality === null ||
-      event.touches.length !== 1 ||
-      !(event.target instanceof Element) ||
-      event.target.closest(
-        "button, a[href], input, select, textarea, [contenteditable]",
-      ) !== null
-    ) {
-      return;
-    }
-
-    const touch = event.touches[0];
-    if (touch === undefined || touch.clientX > backSwipeEdgeWidth) {
-      return;
-    }
-
-    this.#backSwipe.touchId = touch.identifier;
-    this.#backSwipe.startX = touch.clientX;
-    this.#backSwipe.startY = touch.clientY;
-    event.preventDefault();
-  };
-
-  #handleBackSwipeMove = (event) => {
-    if (this.#backSwipe.touchId === null) {
-      return;
-    }
-
-    event.preventDefault();
-  };
-
-  #handleBackSwipeEnd = (event) => {
-    const touch = this.#backSwipeTouch(event.changedTouches);
-    if (touch === null) {
-      return;
-    }
-
-    const horizontalDistance = touch.clientX - this.#backSwipe.startX;
-    const verticalDistance = Math.abs(touch.clientY - this.#backSwipe.startY);
-    this.#resetBackSwipe();
-    event.preventDefault();
-    if (
-      horizontalDistance >= backSwipeMinimumDistance &&
-      horizontalDistance >= verticalDistance * backSwipeDirectionRatio
-    ) {
-      if (this.#pageIndex === 0) {
-        this.#requestClose();
-        return;
-      }
-      this.#scrollToPage(this.#pageIndex - 1, "smooth");
-    }
-  };
-
-  #handleBackSwipeCancel = (event) => {
-    if (this.#backSwipeTouch(event.changedTouches) === null) {
-      return;
-    }
-
-    this.#resetBackSwipe();
-  };
-
-  #backSwipeTouch(touches) {
-    if (this.#backSwipe.touchId === null) {
-      return null;
-    }
-
-    return Array.from(touches).find(
-      (touch) => touch.identifier === this.#backSwipe.touchId,
-    ) ?? null;
-  }
-
-  #resetBackSwipe() {
-    this.#backSwipe.touchId = null;
   }
 
   #createHourlyItem() {
@@ -779,16 +791,16 @@ function captureForecastElements(root) {
       root.querySelector("#forecast-page-announcement"),
       HTMLElement,
     ),
-    title: requiredElement(
-      root.querySelector("#municipality-switcher"),
-      HTMLButtonElement,
-    ),
     locationsButton: requiredElement(
       root.querySelector("#locations-button"),
       HTMLButtonElement,
     ),
-    titleText: requiredElement(
+    title: requiredElement(
       root.querySelector("#municipality-title"),
+      HTMLElement,
+    ),
+    titleText: requiredElement(
+      root.querySelector("#municipality-title-text"),
       HTMLElement,
     ),
     currentReading: requiredElement(

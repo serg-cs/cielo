@@ -506,6 +506,8 @@ fn generates_exact_readable_app_output() {
     assert!(index.contains("id=\"cielo-application\""));
     assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
     assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
+    assert!(index.contains("<h1 id=\"municipality-title\""));
+    assert!(!index.contains("municipality-switcher"));
     assert!(!index.contains("back-swipe-region"));
     assert_generated_fonts(&output_directory, &paths, &index);
 
@@ -983,8 +985,8 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "reorder-announcement",
         "forecast-view",
         "locations-button",
-        "municipality-switcher",
         "municipality-title",
+        "municipality-title-text",
         "current-condition-icon",
         "current-condition-description",
         "current-daily-extrema",

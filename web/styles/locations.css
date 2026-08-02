@@ -2,12 +2,16 @@
   .cielo-locations-view {
     position: relative;
     display: block;
+    flex: 0 0 100%;
+    width: 100%;
     height: 100%;
     overflow-y: auto;
     color-scheme: dark;
     color: var(--cielo-color-text);
     background: var(--cielo-color-locations-background);
     overscroll-behavior-y: contain;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
     scrollbar-gutter: stable;
   }
 

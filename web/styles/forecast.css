@@ -1,17 +1,21 @@
 /* Swipeable current and daily forecast presentation. */
   .cielo-forecast-view {
-    position: absolute;
+    position: relative;
     z-index: 10;
-    inset: 0;
     display: block;
+    flex: 0 0 100%;
+    width: 100%;
+    height: 100%;
     color-scheme: dark;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
 
   .forecast-screen {
     --forecast-bottom-lift: 0.75rem;
     --forecast-data-inset: 1.9rem;
 
-    position: fixed;
+    position: absolute;
     inset: 0;
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
@@ -39,25 +43,21 @@
     margin: 0;
   }
 
-  .locations-button,
-  .location-switcher {
-    border: 0;
-    outline: none;
-    outline-offset: 0.12rem;
-    color: inherit;
-    background: transparent;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-
   .locations-button {
     display: grid;
     flex: 0 0 var(--cielo-touch-target);
     width: var(--cielo-touch-target);
     height: var(--cielo-touch-target);
     padding: 0;
+    border: 0;
     border-radius: 50%;
+    outline: none;
+    outline-offset: 0.12rem;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
     place-items: center;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .locations-button .cielo-icon {
@@ -65,38 +65,28 @@
     height: 1.5rem;
   }
 
-  .location-switcher {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
+  .municipality-title-text {
+    display: block;
+    min-width: 0;
     max-width: 100%;
-    min-height: var(--cielo-touch-target);
     padding: 0.2rem 0.4rem;
-    border-radius: 0.75rem;
+    overflow: hidden;
     font-size: clamp(1.5rem, 6vw, 1.8rem);
     font-weight: 680;
     letter-spacing: -0.025em;
     line-height: 1.2;
     text-align: left;
-  }
-
-  .locations-button:focus-visible,
-  .location-switcher:focus-visible {
-    outline: var(--cielo-focus-outline);
-  }
-
-  .locations-button:active,
-  .location-switcher:active {
-    opacity: 0.78;
-  }
-
-  .municipality-title-text {
-    min-width: 0;
-    padding-block: 0.1em;
-    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     overflow-wrap: anywhere;
+  }
+
+  .locations-button:focus-visible {
+    outline: var(--cielo-focus-outline);
+  }
+
+  .locations-button:active {
+    opacity: 0.78;
   }
 
   .forecast-pages {
@@ -107,7 +97,7 @@
     overflow-y: hidden;
     outline: none;
     outline-offset: -0.2rem;
-    overscroll-behavior-x: contain;
+    overscroll-behavior-x: auto;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -267,7 +257,7 @@
     border-radius: 1rem;
     outline: none;
     outline-offset: -0.2rem;
-    overscroll-behavior-x: contain;
+    overscroll-behavior-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
@@ -510,7 +500,7 @@
   }
 
   .forecast-page-indicator {
-    position: fixed;
+    position: absolute;
     z-index: 4;
     bottom:
       calc(
@@ -561,15 +551,8 @@
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .locations-button:hover,
-    .location-switcher:hover {
+    .locations-button:hover {
       background: var(--cielo-color-surface);
-    }
-  }
-
-  @media (hover: none) and (pointer: coarse) {
-    .forecast-screen {
-      overscroll-behavior-x: none;
     }
   }
 
