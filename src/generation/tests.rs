@@ -506,6 +506,7 @@ fn generates_exact_readable_app_output() {
     assert!(index.contains("id=\"cielo-application\""));
     assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
     assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
+    assert!(index.contains("<symbol id=\"cielo-icon-umbrella\""));
     assert!(index.contains("<h1 id=\"municipality-title\""));
     assert!(!index.contains("municipality-switcher"));
     assert!(!index.contains("back-swipe-region"));
@@ -1035,6 +1036,7 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "daily-condition-icon",
         "daily-precipitation-probability-cell",
         "daily-precipitation-probability-description",
+        "daily-precipitation-probability-icon",
         "daily-precipitation-probability",
         "daily-row-extrema",
         "municipality-name",
@@ -1050,7 +1052,7 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         );
     }
 
-    assert_eq!(invariants.symbol_count, 23);
+    assert_eq!(invariants.symbol_count, 24);
     for target in invariants.use_targets {
         assert!(
             invariants.ids.contains(&target),

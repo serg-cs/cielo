@@ -473,6 +473,8 @@
   }
 
   .daily-table .daily-precipitation-probability-cell {
+    flex-direction: column;
+    gap: 0.15rem;
     justify-content: center;
     padding-inline: 0.2rem;
     color: var(--cielo-color-accent);
@@ -480,6 +482,12 @@
     font-variant-numeric: tabular-nums;
     font-weight: 560;
     line-height: 1;
+  }
+
+  .daily-precipitation-probability-icon {
+    width: 0.9rem;
+    height: 0.9rem;
+    color: var(--cielo-color-text);
   }
 
   .daily-date {

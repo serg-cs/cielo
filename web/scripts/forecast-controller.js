@@ -527,6 +527,10 @@ export class ForecastController {
         element.querySelector(".daily-maximum-temperature"),
         HTMLElement,
       ),
+      precipitationProbabilityIcon: requiredElement(
+        element.querySelector(".daily-precipitation-probability-icon"),
+        SVGElement,
+      ),
       precipitationProbability: requiredElement(
         element.querySelector(".daily-precipitation-probability"),
         HTMLElement,
@@ -697,11 +701,17 @@ export class ForecastController {
         "Máxima",
         period.maximumTemperatureCelsius,
       );
-      item.precipitationProbability.textContent =
+      const precipitationProbabilityText =
         period.precipitationProbabilityPercent !== null &&
           period.precipitationProbabilityPercent > 0
           ? `${period.precipitationProbabilityPercent}%`
           : "";
+      item.precipitationProbabilityIcon.toggleAttribute(
+        "hidden",
+        precipitationProbabilityText === "",
+      );
+      item.precipitationProbability.textContent =
+        precipitationProbabilityText;
       item.precipitationProbabilityDescription.textContent =
         dailyPrecipitationProbabilityLabel(period);
     }
