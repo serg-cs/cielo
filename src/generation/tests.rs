@@ -572,7 +572,7 @@ fn builds_weather_snapshot() {
 
     assert_eq!(snapshot.municipalities.len(), 1);
     assert_eq!(snapshot.municipalities[0].id, "35001");
-    assert_eq!(snapshot.municipalities[0].name, "El Arco");
+    assert_eq!(snapshot.municipalities[0].name, "Agaete");
     assert_eq!(snapshot.municipalities[0].province, "Las Palmas");
     assert_eq!(snapshot.forecasts[0].days.len(), 1);
 
@@ -595,6 +595,23 @@ fn builds_weather_snapshot() {
         snapshot.forecasts[0].days[0].summary.condition,
         Some(WeatherCondition::CloudSun)
     );
+}
+
+#[test]
+fn publishes_established_spanish_location_names() {
+    let source_data = AemetWeatherData {
+        municipalities: HashMap::from([("25120".to_owned(), "Lleida".to_owned())]),
+        forecasts: vec![MunicipalityForecast {
+            province: "Lleida".to_owned(),
+            ..sample_forecast("25120")
+        }],
+        daily_forecasts: vec![sample_daily_forecast("25120")],
+    };
+
+    let snapshot = build_snapshot(source_data).expect("snapshot should build");
+
+    assert_eq!(snapshot.municipalities[0].name, "Lérida");
+    assert_eq!(snapshot.municipalities[0].province, "Lérida");
 }
 
 #[test]
@@ -721,7 +738,7 @@ fn groups_forecasts_into_stable_twenty_id_ranges() {
     source_data.municipalities.clear();
     source_data.forecasts.clear();
     source_data.daily_forecasts.clear();
-    for id in ["35000", "35019", "35020", "36000"] {
+    for id in ["35001", "35019", "35020", "36001"] {
         source_data
             .municipalities
             .insert(id.to_owned(), format!("Municipality {id}"));
@@ -754,7 +771,7 @@ fn groups_forecasts_into_stable_twenty_id_ranges() {
         .expect("bundle forecasts should be an object");
     assert_eq!(
         forecasts.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["35000", "35019"]
+        ["35001", "35019"]
     );
     assert!(forecasts["35019"].get("municipality_id").is_none());
 }
@@ -1111,7 +1128,7 @@ fn attribute_value(attributes: &[html5ever::Attribute], name: &str) -> Option<St
 
 fn sample_source_data() -> AemetWeatherData {
     AemetWeatherData {
-        municipalities: HashMap::from([("35001".to_owned(), "Arco, El".to_owned())]),
+        municipalities: HashMap::from([("35001".to_owned(), "Agaete".to_owned())]),
         forecasts: vec![sample_forecast("35001")],
         daily_forecasts: vec![sample_daily_forecast("35001")],
     }

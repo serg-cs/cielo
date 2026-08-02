@@ -15,8 +15,8 @@ use crate::aemet::{
     validate_municipality_id,
 };
 
-use super::GENERATOR_IDENTITY;
 use super::publisher::{OutputKind, create_staging_directory, publish_staging_directory};
+use super::{GENERATOR_IDENTITY, location_names::LocationNames};
 
 const FORECAST_BUNDLE_RANGE_SIZE: u16 = 20;
 const FORECASTS_DIRECTORY: &str = "forecasts";
@@ -173,6 +173,7 @@ pub(super) fn build_snapshot(source_data: AemetWeatherData) -> Result<WeatherDat
     } = source_data;
     forecasts.sort_by(|left, right| left.id.cmp(&right.id));
     let mut daily_forecasts = index_daily_forecasts(daily_forecasts)?;
+    let location_names = LocationNames::load().context("failed to load Spanish location names")?;
 
     let mut source_forecast_ids = HashSet::with_capacity(forecasts.len());
     let mut retained_forecast_ids = HashSet::with_capacity(forecasts.len());
@@ -208,25 +209,19 @@ pub(super) fn build_snapshot(source_data: AemetWeatherData) -> Result<WeatherDat
             continue;
         }
 
-        let source_name = if let Some(master_name) = master_municipalities.get(&forecast.id) {
-            master_name.trim()
-        } else {
+        if !master_municipalities.contains_key(&forecast.id) {
             forecast_only_count += 1;
-            forecast.name.trim()
-        };
-        let name = normalize_municipality_name(source_name);
-        if name.is_empty() {
-            bail!("municipality {} has an empty name", forecast.id);
         }
-        let province = normalize_province(&forecast.province);
-        if province.is_empty() {
+        if forecast.province.trim().is_empty() {
             bail!("municipality {} has an empty province", forecast.id);
         }
+        let name = location_names.municipality(&forecast.id)?.to_owned();
+        let province = location_names.province(&forecast.id)?.to_owned();
 
         municipalities.push(MunicipalityRecord {
             id: forecast.id.clone(),
             name,
-            province: province.to_owned(),
+            province,
             time_zone: time_zone_for(&forecast.id),
         });
         retained_forecast_ids.insert(forecast.id.clone());
@@ -515,74 +510,6 @@ impl WeatherDataStatistics {
         self.file_count += 1;
         self.total_bytes += bytes.len();
     }
-}
-
-fn normalize_province(province: &str) -> &str {
-    let province = province.trim();
-    let province = if let Some(base) = province
-        .strip_suffix(')')
-        .and_then(|value| value.rsplit_once(" (").map(|(base, _)| base.trim()))
-    {
-        base
-    } else {
-        province
-    };
-
-    province
-        .rsplit_once('/')
-        .map_or(province, |(_, spanish_name)| spanish_name.trim())
-}
-
-fn normalize_municipality_name(name: &str) -> String {
-    name.trim()
-        .split('/')
-        .map(normalize_deferred_article)
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn normalize_deferred_article(name: &str) -> String {
-    let name = name.trim();
-    let Some((base, article)) = name.rsplit_once(',') else {
-        return name.to_owned();
-    };
-    let base = base.trim();
-    let article = article.trim();
-    if base.is_empty() || !is_deferred_article(article) {
-        return name.to_owned();
-    }
-
-    if article.ends_with('\'') || article.ends_with('’') {
-        format!("{article}{base}")
-    } else {
-        format!("{article} {base}")
-    }
-}
-
-fn is_deferred_article(value: &str) -> bool {
-    matches!(
-        value,
-        "A" | "As"
-            | "El"
-            | "Els"
-            | "Es"
-            | "L'"
-            | "L’"
-            | "La"
-            | "Las"
-            | "Les"
-            | "Los"
-            | "O"
-            | "Os"
-            | "Sa"
-            | "Ses"
-            | "el"
-            | "els"
-            | "l'"
-            | "l’"
-            | "la"
-            | "les"
-    )
 }
 
 fn time_zone_for(municipality_id: &str) -> TimeZone {

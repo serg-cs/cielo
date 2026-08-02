@@ -1,5 +1,6 @@
 mod application;
 mod files;
+mod location_names;
 mod publisher;
 mod weather_data;
 
