@@ -515,19 +515,34 @@
         0.9rem
         + var(--forecast-bottom-lift)
         + env(safe-area-inset-bottom)
+        - 1.325rem
       );
     left: 50%;
     display: flex;
+    width: calc(var(--cielo-touch-target) + var(--cielo-space-4));
+    height: var(--cielo-touch-target);
+    padding: 0;
+    border: 0;
+    border-radius: var(--cielo-radius-pill);
+    outline: none;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
     gap: 0.4rem;
     align-items: center;
-    pointer-events: none;
+    justify-content: center;
     transform: translateX(-50%);
+    -webkit-tap-highlight-color: transparent;
   }
 
-  .forecast-pages:focus-visible + .forecast-page-indicator {
-    border-radius: 0.5rem;
+  .forecast-pages:focus-visible + .forecast-page-indicator,
+  .forecast-page-indicator:focus-visible {
     outline: var(--cielo-focus-outline);
-    outline-offset: 0.3rem;
+    outline-offset: 0.12rem;
+  }
+
+  .forecast-page-indicator:active {
+    background: var(--cielo-color-surface);
   }
 
   .forecast-page-dot {
@@ -559,7 +574,8 @@
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .locations-button:hover {
+    .locations-button:hover,
+    .forecast-page-indicator:hover {
       background: var(--cielo-color-surface);
     }
   }
@@ -575,7 +591,7 @@
     }
 
     .forecast-page-indicator {
-      bottom: calc(0.25rem + env(safe-area-inset-bottom));
+      bottom: env(safe-area-inset-bottom);
     }
 
     .current-forecast-page {

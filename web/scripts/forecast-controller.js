@@ -176,6 +176,7 @@ export class ForecastController {
     this.#pageIndicators = this.#elements.pages.map(() => {
       const indicator = document.createElement("span");
       indicator.className = "forecast-page-dot";
+      indicator.setAttribute("aria-hidden", "true");
       this.#elements.pageIndicator.append(indicator);
       return indicator;
     });
@@ -185,6 +186,15 @@ export class ForecastController {
   #installInteractions() {
     this.#elements.locationsButton.addEventListener("click", () => {
       this.#requestClose();
+    });
+    this.#elements.pageIndicator.addEventListener("click", () => {
+      const pageCount = this.#elements.pages.length;
+      if (this.#municipality === null || pageCount === 0) {
+        return;
+      }
+
+      const nextPageIndex = (this.#pageIndex + 1) % pageCount;
+      this.#scrollToPage(nextPageIndex, "smooth");
     });
     this.#elements.pageTrack.addEventListener(
       "scroll",
@@ -795,7 +805,7 @@ function captureForecastElements(root) {
     ),
     pageIndicator: requiredElement(
       root.querySelector("#forecast-page-indicator"),
-      HTMLElement,
+      HTMLButtonElement,
     ),
     pageAnnouncement: requiredElement(
       root.querySelector("#forecast-page-announcement"),

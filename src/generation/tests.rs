@@ -959,6 +959,7 @@ struct GeneratedDocumentInvariants {
     classes: HashSet<String>,
     use_targets: Vec<String>,
     symbol_count: usize,
+    page_indicator_is_accessible_button: bool,
 }
 
 fn assert_generated_document_invariants(dom: &RcDom) {
@@ -1053,6 +1054,10 @@ fn assert_generated_document_invariants(dom: &RcDom) {
     }
 
     assert_eq!(invariants.symbol_count, 24);
+    assert!(
+        invariants.page_indicator_is_accessible_button,
+        "forecast page indicator should be an accessible button"
+    );
     for target in invariants.use_targets {
         assert!(
             invariants.ids.contains(&target),
@@ -1084,6 +1089,19 @@ fn collect_document_invariants(handle: &Handle, invariants: &mut GeneratedDocume
         }
 
         match name.local.as_ref() {
+            "button" if id.as_deref() == Some("forecast-page-indicator") => {
+                assert_eq!(
+                    attribute_value(&attributes, "type").as_deref(),
+                    Some("button"),
+                    "forecast page indicator should not submit forms"
+                );
+                assert_eq!(
+                    attribute_value(&attributes, "aria-label").as_deref(),
+                    Some("Mostrar la siguiente página de previsión"),
+                    "forecast page indicator should describe its action"
+                );
+                invariants.page_indicator_is_accessible_button = true;
+            }
             "symbol" => {
                 invariants.symbol_count += 1;
                 assert!(
