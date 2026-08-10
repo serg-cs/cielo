@@ -58,6 +58,11 @@ pub(crate) struct HourlyForecast {
     pub(crate) condition: WeatherCondition,
     pub(crate) description: String,
     pub(crate) precipitation_amount: Option<PrecipitationAmount>,
+    pub(crate) wind_direction: Option<String>,
+    pub(crate) wind_speed_kilometres_per_hour: Option<u16>,
+    pub(crate) maximum_gust_kilometres_per_hour: Option<u16>,
+    pub(crate) relative_humidity_percent: Option<u8>,
+    pub(crate) apparent_temperature_celsius: Option<i16>,
 }
 
 /// Measurable or trace precipitation accumulated during one forecast hour.

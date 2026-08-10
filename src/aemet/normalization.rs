@@ -147,6 +147,30 @@ struct ForecastDay {
         deserialize_with = "deserialize_one_or_many"
     )]
     precipitation_probabilities: Vec<ForecastPeriodValue>,
+    #[serde(
+        default,
+        rename = "viento",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    winds: Vec<ForecastWind>,
+    #[serde(
+        default,
+        rename = "racha_max",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    maximum_gusts: Vec<ForecastPeriodValue>,
+    #[serde(
+        default,
+        rename = "humedad_relativa",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    relative_humidity: Vec<ForecastPeriodValue>,
+    #[serde(
+        default,
+        rename = "sens_termica",
+        deserialize_with = "deserialize_one_or_many"
+    )]
+    apparent_temperatures: Vec<ForecastPeriodValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,10 +204,20 @@ enum ForecastPeriodValueSource {
     Detailed {
         #[serde(default, rename = "periodo")]
         period: Option<String>,
-        #[serde(default, rename = "valor")]
+        #[serde(default, rename = "valor", alias = "value")]
         value: Option<SourceValue>,
     },
     Unperioded(SourceValue),
+}
+
+#[derive(Debug, Deserialize)]
+struct ForecastWind {
+    #[serde(rename = "periodo")]
+    period: String,
+    #[serde(rename = "direccion", deserialize_with = "deserialize_one_or_many")]
+    directions: Vec<SourceValue>,
+    #[serde(rename = "velocidad", deserialize_with = "deserialize_one_or_many")]
+    speeds: Vec<SourceValue>,
 }
 
 impl From<ForecastPeriodValueSource> for ForecastPeriodValue {
@@ -209,6 +243,32 @@ enum SourceValue {
 struct NormalizedCondition {
     condition: WeatherCondition,
     description: String,
+}
+
+#[derive(Debug)]
+struct NormalizedWind {
+    direction: Option<String>,
+    speed_kilometres_per_hour: Option<u16>,
+}
+
+#[derive(Default)]
+struct HourlyMeasurementIndex {
+    precipitation_amounts: BTreeMap<(String, u8), PrecipitationAmount>,
+    precipitation_amount_keys: HashSet<(String, u8)>,
+    winds: BTreeMap<(String, u8), NormalizedWind>,
+    maximum_gusts: BTreeMap<(String, u8), u16>,
+    maximum_gust_keys: HashSet<(String, u8)>,
+    relative_humidity: BTreeMap<(String, u8), u8>,
+    relative_humidity_keys: HashSet<(String, u8)>,
+    apparent_temperatures: BTreeMap<(String, u8), i16>,
+}
+
+struct HourlyMeasurementValues {
+    precipitation_amounts: Vec<ForecastPeriodValue>,
+    winds: Vec<ForecastWind>,
+    maximum_gusts: Vec<ForecastPeriodValue>,
+    relative_humidity: Vec<ForecastPeriodValue>,
+    apparent_temperatures: Vec<ForecastPeriodValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -788,6 +848,28 @@ impl SourceValue {
         }
     }
 
+    fn non_negative_integer(&self) -> Option<u16> {
+        match self {
+            Self::Integer(value) => u16::try_from(*value).ok(),
+            Self::Decimal(value) if value.is_finite() && value.fract() == 0.0 => {
+                value.to_string().parse().ok()
+            }
+            Self::Decimal(_) => None,
+            Self::Text(value) => value.trim().parse().ok(),
+        }
+    }
+
+    fn signed_integer(&self) -> Option<i16> {
+        match self {
+            Self::Integer(value) => i16::try_from(*value).ok(),
+            Self::Decimal(value) if value.is_finite() && value.fract() == 0.0 => {
+                value.to_string().parse().ok()
+            }
+            Self::Decimal(_) => None,
+            Self::Text(value) => value.trim().parse().ok(),
+        }
+    }
+
     fn is_empty_text(&self) -> bool {
         matches!(self, Self::Text(value) if value.trim().is_empty())
     }
@@ -826,8 +908,7 @@ pub(super) fn normalize_forecast(
     // Normalize conditions independently so source array order cannot affect joins.
     let mut conditions = BTreeMap::new();
     let mut daily_forecasts = BTreeMap::new();
-    let mut precipitation_amounts = BTreeMap::new();
-    let mut precipitation_amount_keys = HashSet::new();
+    let mut measurements = HourlyMeasurementIndex::default();
     let mut temperature_values = Vec::new();
     for day in root.prediction.days {
         let ForecastDay {
@@ -838,6 +919,10 @@ pub(super) fn normalize_forecast(
             temperatures,
             precipitation_amounts: source_precipitation_amounts,
             precipitation_probabilities,
+            winds,
+            maximum_gusts,
+            relative_humidity: source_relative_humidity,
+            apparent_temperatures,
         } = day;
         let precipitation_probabilities =
             normalize_hourly_precipitation_probabilities(precipitation_probabilities, &root.id)?;
@@ -867,10 +952,15 @@ pub(super) fn normalize_forecast(
             temperature_values.push((date.clone(), hour, celsius));
         }
 
-        insert_hourly_precipitation_amounts(
-            &mut precipitation_amounts,
-            &mut precipitation_amount_keys,
-            source_precipitation_amounts,
+        insert_hourly_measurements(
+            &mut measurements,
+            HourlyMeasurementValues {
+                precipitation_amounts: source_precipitation_amounts,
+                winds,
+                maximum_gusts,
+                relative_humidity: source_relative_humidity,
+                apparent_temperatures,
+            },
             &date,
             &root.id,
         )?;
@@ -890,7 +980,7 @@ pub(super) fn normalize_forecast(
     let daily_forecasts = join_hourly_forecasts(
         daily_forecasts,
         &conditions,
-        &precipitation_amounts,
+        &measurements,
         temperature_values,
         &root.id,
     )?;
@@ -979,10 +1069,238 @@ fn insert_hourly_precipitation_amounts(
     Ok(())
 }
 
+fn insert_hourly_measurements(
+    measurements: &mut HourlyMeasurementIndex,
+    values: HourlyMeasurementValues,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    let HourlyMeasurementValues {
+        precipitation_amounts,
+        winds,
+        maximum_gusts,
+        relative_humidity,
+        apparent_temperatures,
+    } = values;
+    insert_hourly_precipitation_amounts(
+        &mut measurements.precipitation_amounts,
+        &mut measurements.precipitation_amount_keys,
+        precipitation_amounts,
+        date,
+        municipality_id,
+    )?;
+    insert_hourly_wind_and_maximum_gusts(
+        &mut measurements.winds,
+        &mut measurements.maximum_gusts,
+        &mut measurements.maximum_gust_keys,
+        winds,
+        maximum_gusts,
+        date,
+        municipality_id,
+    )?;
+    insert_hourly_relative_humidity(
+        &mut measurements.relative_humidity,
+        &mut measurements.relative_humidity_keys,
+        relative_humidity,
+        date,
+        municipality_id,
+    )?;
+    insert_hourly_apparent_temperatures(
+        &mut measurements.apparent_temperatures,
+        apparent_temperatures,
+        date,
+        municipality_id,
+    )
+}
+
+fn insert_hourly_wind_and_maximum_gusts(
+    wind_index: &mut BTreeMap<(String, u8), NormalizedWind>,
+    maximum_gusts: &mut BTreeMap<(String, u8), u16>,
+    maximum_gust_keys: &mut HashSet<(String, u8)>,
+    source_winds: Vec<ForecastWind>,
+    maximum_gust_values: Vec<ForecastPeriodValue>,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    for value in source_winds {
+        let hour = normalize_measurement_hour(&value.period, "wind", municipality_id)?;
+        let direction = normalize_wind_direction(value.directions, municipality_id)?;
+        let speed_kilometres_per_hour =
+            normalize_single_u16(value.speeds, "wind speed", municipality_id)?;
+        let key = (date.to_owned(), hour);
+        if wind_index
+            .insert(
+                key,
+                NormalizedWind {
+                    direction,
+                    speed_kilometres_per_hour,
+                },
+            )
+            .is_some()
+        {
+            bail!("forecast {municipality_id} contains duplicate wind hours");
+        }
+    }
+    for value in maximum_gust_values {
+        let period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .context("hourly maximum gust does not contain a period")?;
+        let hour = normalize_measurement_hour(period, "maximum gust", municipality_id)?;
+        let key = (date.to_owned(), hour);
+        if !maximum_gust_keys.insert(key.clone()) {
+            bail!("forecast {municipality_id} contains duplicate maximum gust hours");
+        }
+        let Some(gust) = normalize_optional_u16(value.value, "maximum gust", municipality_id)?
+        else {
+            continue;
+        };
+        maximum_gusts.insert(key, gust);
+    }
+    Ok(())
+}
+
+fn insert_hourly_relative_humidity(
+    humidity: &mut BTreeMap<(String, u8), u8>,
+    humidity_keys: &mut HashSet<(String, u8)>,
+    values: Vec<ForecastPeriodValue>,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    for value in values {
+        let period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .context("hourly relative humidity does not contain a period")?;
+        let hour = normalize_measurement_hour(period, "relative humidity", municipality_id)?;
+        let key = (date.to_owned(), hour);
+        if !humidity_keys.insert(key.clone()) {
+            bail!("forecast {municipality_id} contains duplicate relative humidity hours");
+        }
+        let Some(percent) =
+            normalize_optional_u16(value.value, "relative humidity", municipality_id)?
+        else {
+            continue;
+        };
+        let percent = u8::try_from(percent)
+            .ok()
+            .filter(|percent| *percent <= 100)
+            .context("relative humidity is outside the supported range")?;
+        humidity.insert(key, percent);
+    }
+    Ok(())
+}
+
+fn insert_hourly_apparent_temperatures(
+    temperatures: &mut BTreeMap<(String, u8), i16>,
+    values: Vec<ForecastPeriodValue>,
+    date: &str,
+    municipality_id: &str,
+) -> Result<()> {
+    for value in values {
+        let period = value
+            .period
+            .as_deref()
+            .map(str::trim)
+            .context("hourly apparent temperature does not contain a period")?;
+        let hour = normalize_measurement_hour(period, "apparent temperature", municipality_id)?;
+        let Some(source) = value.value else {
+            continue;
+        };
+        if source.is_empty_text() {
+            continue;
+        }
+        let celsius = source.signed_integer().with_context(|| {
+            format!("invalid apparent temperature in forecast {municipality_id}")
+        })?;
+        if temperatures
+            .insert((date.to_owned(), hour), celsius)
+            .is_some()
+        {
+            bail!("forecast {municipality_id} contains duplicate apparent temperature hours");
+        }
+    }
+    Ok(())
+}
+
+fn normalize_measurement_hour(period: &str, label: &str, municipality_id: &str) -> Result<u8> {
+    let hour = period
+        .trim()
+        .parse::<u8>()
+        .with_context(|| format!("invalid {label} hour in forecast {municipality_id}"))?;
+    if hour > 23 {
+        bail!("invalid {label} hour in forecast {municipality_id}: {hour}");
+    }
+    Ok(hour)
+}
+
+fn normalize_wind_direction(
+    values: Vec<SourceValue>,
+    municipality_id: &str,
+) -> Result<Option<String>> {
+    let Some(value) = normalize_single_source_value(values, "wind direction", municipality_id)?
+    else {
+        return Ok(None);
+    };
+    let SourceValue::Text(direction) = value else {
+        bail!("invalid wind direction in forecast {municipality_id}");
+    };
+    let direction = direction.trim().to_uppercase();
+    if direction.is_empty() {
+        return Ok(None);
+    }
+    if !matches!(
+        direction.as_str(),
+        "C" | "N" | "NE" | "E" | "SE" | "S" | "SO" | "O" | "NO" | "VRB"
+    ) {
+        bail!("invalid wind direction in forecast {municipality_id}: {direction}");
+    }
+    Ok(Some(direction))
+}
+
+fn normalize_single_u16(
+    values: Vec<SourceValue>,
+    label: &str,
+    municipality_id: &str,
+) -> Result<Option<u16>> {
+    let value = normalize_single_source_value(values, label, municipality_id)?;
+    normalize_optional_u16(value, label, municipality_id)
+}
+
+fn normalize_single_source_value(
+    mut values: Vec<SourceValue>,
+    label: &str,
+    municipality_id: &str,
+) -> Result<Option<SourceValue>> {
+    if values.len() > 1 {
+        bail!("forecast {municipality_id} contains multiple {label} values for one hour");
+    }
+    Ok(values.pop())
+}
+
+fn normalize_optional_u16(
+    value: Option<SourceValue>,
+    label: &str,
+    municipality_id: &str,
+) -> Result<Option<u16>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty_text() {
+        return Ok(None);
+    }
+    value
+        .non_negative_integer()
+        .map(Some)
+        .with_context(|| format!("invalid {label} in forecast {municipality_id}"))
+}
+
 fn join_hourly_forecasts(
     mut daily_forecasts: BTreeMap<String, DailyForecast>,
     conditions: &BTreeMap<(String, u8), NormalizedCondition>,
-    precipitation_amounts: &BTreeMap<(String, u8), PrecipitationAmount>,
+    measurements: &HourlyMeasurementIndex,
     mut temperature_values: Vec<(String, u8, i16)>,
     municipality_id: &str,
 ) -> Result<Vec<DailyForecast>> {
@@ -1002,12 +1320,18 @@ fn join_hourly_forecasts(
         let daily_forecast = daily_forecasts
             .get_mut(&date)
             .context("forecast day index unexpectedly became incomplete")?;
+        let wind = measurements.winds.get(&key);
         daily_forecast.hourly_forecasts.push(HourlyForecast {
             hour,
             temperature_celsius,
             condition: condition.condition,
             description: condition.description.clone(),
-            precipitation_amount: precipitation_amounts.get(&key).copied(),
+            precipitation_amount: measurements.precipitation_amounts.get(&key).copied(),
+            wind_direction: wind.and_then(|value| value.direction.clone()),
+            wind_speed_kilometres_per_hour: wind.and_then(|value| value.speed_kilometres_per_hour),
+            maximum_gust_kilometres_per_hour: measurements.maximum_gusts.get(&key).copied(),
+            relative_humidity_percent: measurements.relative_humidity.get(&key).copied(),
+            apparent_temperature_celsius: measurements.apparent_temperatures.get(&key).copied(),
         });
     }
 

@@ -99,6 +99,11 @@ struct ForecastHourDocument<'a> {
     state: WeatherCondition,
     desc: &'a str,
     precip_mm: Option<PrecipitationAmount>,
+    wind_dir: Option<&'a str>,
+    wind_kmh: Option<u16>,
+    gust_kmh: Option<u16>,
+    humidity_pct: Option<u8>,
+    feels_like_c: Option<i16>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -442,6 +447,11 @@ fn forecast_days(days: &[MergedForecastDay]) -> Vec<ForecastDayDocument<'_>> {
                     state: forecast.condition,
                     desc: &forecast.description,
                     precip_mm: forecast.precipitation_amount,
+                    wind_dir: forecast.wind_direction.as_deref(),
+                    wind_kmh: forecast.wind_speed_kilometres_per_hour,
+                    gust_kmh: forecast.maximum_gust_kilometres_per_hour,
+                    humidity_pct: forecast.relative_humidity_percent,
+                    feels_like_c: forecast.apparent_temperature_celsius,
                 })
                 .collect(),
         })

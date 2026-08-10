@@ -93,6 +93,105 @@
               </div>
               <section id="hourly-forecast" class="hourly-forecast" hidden>
                 <h2 id="hourly-forecast-title" class="visually-hidden">Previsión por horas</h2>
+                <div class="hourly-forecast-toolbar">
+                  <span
+                    id="hourly-mode-explanation"
+                    class="hourly-mode-explanation"
+                    aria-hidden="true"
+                    hidden
+                  ></span>
+                  <div class="hourly-mode-picker">
+                    <button
+                      id="hourly-mode-button"
+                      class="hourly-mode-button"
+                      type="button"
+                      aria-label="Datos por hora: Tiempo"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                      aria-controls="hourly-mode-listbox"
+                    >
+                      <svg class="cielo-icon hourly-mode-current-icon" aria-hidden="true">
+                        <use href="#cielo-icon-cloud-sun"></use>
+                      </svg>
+                      <svg class="cielo-icon hourly-mode-chevron" aria-hidden="true">
+                        <use href="#cielo-icon-chevron-down"></use>
+                      </svg>
+                    </button>
+                    <div
+                      id="hourly-mode-listbox"
+                      class="hourly-mode-listbox"
+                      role="listbox"
+                      aria-label="Datos por hora"
+                      hidden
+                    >
+                      <button
+                        class="hourly-mode-option"
+                        type="button"
+                        role="option"
+                        aria-selected="true"
+                        data-hourly-mode="weather"
+                        tabindex="-1"
+                      >
+                        <svg class="cielo-icon" aria-hidden="true">
+                          <use href="#cielo-icon-cloud-sun"></use>
+                        </svg>
+                        <span>Tiempo</span>
+                      </button>
+                      <button
+                        class="hourly-mode-option"
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        data-hourly-mode="wind"
+                        tabindex="-1"
+                      >
+                        <svg class="cielo-icon" aria-hidden="true">
+                          <use href="#cielo-icon-wind"></use>
+                        </svg>
+                        <span>Viento</span>
+                      </button>
+                      <button
+                        class="hourly-mode-option"
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        data-hourly-mode="precipitation"
+                        tabindex="-1"
+                      >
+                        <svg class="cielo-icon" aria-hidden="true">
+                          <use href="#cielo-icon-umbrella"></use>
+                        </svg>
+                        <span>Precipitación</span>
+                      </button>
+                      <button
+                        class="hourly-mode-option"
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        data-hourly-mode="humidity"
+                        tabindex="-1"
+                      >
+                        <svg class="cielo-icon" aria-hidden="true">
+                          <use href="#cielo-icon-droplet"></use>
+                        </svg>
+                        <span>Humedad</span>
+                      </button>
+                      <button
+                        class="hourly-mode-option"
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        data-hourly-mode="feels-like"
+                        tabindex="-1"
+                      >
+                        <svg class="cielo-icon" aria-hidden="true">
+                          <use href="#cielo-icon-thermometer"></use>
+                        </svg>
+                        <span>Sensación</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div
                   class="hourly-scroll"
                   tabindex="0"

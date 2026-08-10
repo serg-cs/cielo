@@ -500,16 +500,7 @@ fn generates_exact_readable_app_output() {
         "generated HTML contains parse errors"
     );
     assert_generated_document_invariants(&dom);
-    assert!(index.contains("<template id=\"municipality-row-template\">"));
-    assert!(index.contains("<template id=\"daily-forecast-period-template\">"));
-    assert!(index.contains(r#"<meta name="generator" content="cielo">"#));
-    assert!(index.contains("id=\"cielo-application\""));
-    assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
-    assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
-    assert!(index.contains("<symbol id=\"cielo-icon-umbrella\""));
-    assert!(index.contains("<h1 id=\"municipality-title\""));
-    assert!(!index.contains("municipality-switcher"));
-    assert!(!index.contains("back-swipe-region"));
+    assert_generated_index_content(&index);
     assert_generated_fonts(&output_directory, &paths, &index);
 
     for path in paths.iter().filter(|path| has_extension(path, "css")) {
@@ -545,6 +536,19 @@ fn generates_exact_readable_app_output() {
     }
 
     assert_application_manifest(&output_directory, &paths, &index);
+}
+
+fn assert_generated_index_content(index: &str) {
+    assert!(index.contains("<template id=\"municipality-row-template\">"));
+    assert!(index.contains("<template id=\"daily-forecast-period-template\">"));
+    assert!(index.contains(r#"<meta name="generator" content="cielo">"#));
+    assert!(index.contains("id=\"cielo-application\""));
+    assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
+    assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
+    assert!(index.contains("<symbol id=\"cielo-icon-umbrella\""));
+    assert!(index.contains("<h1 id=\"municipality-title\""));
+    assert!(!index.contains("municipality-switcher"));
+    assert!(!index.contains("back-swipe-region"));
 }
 
 #[test]
@@ -665,6 +669,11 @@ fn writes_readable_weather_data_files() {
     assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
     assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
     assert_eq!(forecast[0]["hours"][0]["precip_mm"], "trace");
+    assert_eq!(forecast[0]["hours"][0]["wind_dir"], "NE");
+    assert_eq!(forecast[0]["hours"][0]["wind_kmh"], 18);
+    assert_eq!(forecast[0]["hours"][0]["gust_kmh"], 32);
+    assert_eq!(forecast[0]["hours"][0]["humidity_pct"], 64);
+    assert_eq!(forecast[0]["hours"][0]["feels_like_c"], 26);
 
     // Generated JSON has no formatting-only whitespace.
     for path in [
@@ -966,6 +975,23 @@ fn assert_generated_document_invariants(dom: &RcDom) {
     let mut invariants = GeneratedDocumentInvariants::default();
     collect_document_invariants(&dom.document, &mut invariants);
 
+    assert_generated_document_ids(&invariants);
+    assert_generated_document_classes(&invariants);
+
+    assert_eq!(invariants.symbol_count, 29);
+    assert!(
+        invariants.page_indicator_is_accessible_button,
+        "forecast page indicator should be an accessible button"
+    );
+    for target in invariants.use_targets {
+        assert!(
+            invariants.ids.contains(&target),
+            "icon reference does not resolve to a generated symbol: #{target}"
+        );
+    }
+}
+
+fn assert_generated_document_ids(invariants: &GeneratedDocumentInvariants) {
     // Keep controller roots and template-owned elements synchronized with the document.
     for required_id in [
         "cielo-application",
@@ -1000,6 +1026,9 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "forecast-page-indicator",
         "forecast-page-announcement",
         "hourly-forecast",
+        "hourly-mode-explanation",
+        "hourly-mode-button",
+        "hourly-mode-listbox",
         "hourly-forecast-list",
         "daily-forecast-title",
         "daily-forecast-list",
@@ -1012,6 +1041,9 @@ fn assert_generated_document_invariants(dom: &RcDom) {
             "generated document is missing required ID {required_id}"
         );
     }
+}
+
+fn assert_generated_document_classes(invariants: &GeneratedDocumentInvariants) {
     for required_class in [
         "forecast-screen",
         "forecast-current-summary",
@@ -1025,10 +1057,24 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         "daily-maximum-extreme",
         "forecast-page",
         "hourly-scroll",
+        "hourly-mode-explanation",
+        "hourly-mode-picker",
+        "hourly-mode-option",
         "hourly-hour",
         "hourly-condition-icon",
         "hourly-precipitation-probability",
         "hourly-temperature",
+        "hourly-wind-direction-arrow",
+        "hourly-wind-speed-reading",
+        "hourly-wind-speed",
+        "hourly-wind-speed-separator",
+        "hourly-wind-gust",
+        "hourly-mode-precipitation-probability",
+        "hourly-precipitation-amount",
+        "hourly-humidity-reading",
+        "hourly-humidity-value",
+        "hourly-humidity-unit",
+        "hourly-apparent-temperature",
         "daily-scroll",
         "daily-weekday",
         "daily-weekday-details",
@@ -1050,18 +1096,6 @@ fn assert_generated_document_invariants(dom: &RcDom) {
         assert!(
             invariants.classes.contains(required_class),
             "generated document is missing required class {required_class}"
-        );
-    }
-
-    assert_eq!(invariants.symbol_count, 24);
-    assert!(
-        invariants.page_indicator_is_accessible_button,
-        "forecast page indicator should be an accessible button"
-    );
-    for target in invariants.use_targets {
-        assert!(
-            invariants.ids.contains(&target),
-            "icon reference does not resolve to a generated symbol: #{target}"
         );
     }
 }
@@ -1199,6 +1233,11 @@ fn sample_forecast(id: &str) -> MunicipalityForecast {
                 condition: WeatherCondition::CloudSun,
                 description: "Intervalos nubosos".to_owned(),
                 precipitation_amount: Some(PrecipitationAmount::Trace),
+                wind_direction: Some("NE".to_owned()),
+                wind_speed_kilometres_per_hour: Some(18),
+                maximum_gust_kilometres_per_hour: Some(32),
+                relative_humidity_percent: Some(64),
+                apparent_temperature_celsius: Some(26),
             }],
         }],
     }

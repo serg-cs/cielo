@@ -8,6 +8,49 @@ const pageSwipeDirectionRatio = 1.25;
 const pageSwipeMinimumDistancePixels = 48;
 const pageSwipeMinimumFlickDistancePixels = 20;
 const pageSwipeMinimumVelocityPixelsPerMillisecond = 0.35;
+const hourlyModes = [
+  "weather",
+  "wind",
+  "precipitation",
+  "humidity",
+  "feels-like",
+];
+const hourlyModeDetails = {
+  weather: { label: "Tiempo", icon: "cloud-sun", explanation: null },
+  wind: {
+    label: "Viento",
+    icon: "wind",
+    explanation: "Viento-Rachas (km/h)",
+  },
+  precipitation: {
+    label: "Precipitación",
+    icon: "umbrella",
+    explanation: "Probabilidad (%) / acumulado (mm)",
+  },
+  humidity: {
+    label: "Humedad",
+    icon: "droplet",
+    explanation: "Humedad relativa (%)",
+  },
+  "feels-like": {
+    label: "Sensación",
+    icon: "thermometer",
+    explanation: "Sensación térmica (°C)",
+  },
+};
+const windFlowRotationByDirection = {
+  N: 180,
+  NE: 225,
+  E: 270,
+  SE: 315,
+  S: 0,
+  SO: 45,
+  O: 90,
+  NO: 135,
+};
+const precipitationAmountFormatter = new Intl.NumberFormat("es-ES", {
+  maximumFractionDigits: 1,
+});
 const weekdayFormatter = new Intl.DateTimeFormat("es-ES", {
   weekday: "short",
   timeZone: "UTC",
@@ -36,6 +79,8 @@ export class ForecastController {
   #forecastStatus = "loading";
   #dailyItems = [];
   #hourlyItems = [];
+  #hourlyMode = "weather";
+  #hourlyModePickerIsOpen = false;
   #pageIndicators = [];
   #pageIndex = 0;
   #settledPageIndex = 0;
@@ -75,6 +120,9 @@ export class ForecastController {
     this.#hourlyForecastPeriods = hourlyForecastPeriods;
     this.#dailyForecastPeriods = dailyForecastPeriods;
     this.#forecastStatus = forecastStatus;
+    this.#hourlyMode = "weather";
+    this.#closeHourlyModePicker();
+    this.#renderHourlyModePicker();
     this.#resetHourlyScrollOnRender = true;
     this.#elements.titleText.textContent = municipality.name;
     this.#elements.title.setAttribute(
@@ -159,6 +207,8 @@ export class ForecastController {
     this.#dailyForecastPeriods = [];
     this.#hourlyForecastPeriods = [];
     this.#forecastStatus = "loading";
+    this.#hourlyMode = "weather";
+    this.#closeHourlyModePicker();
     this.#clearPageTimers();
     document.removeEventListener("keydown", this.#handleDocumentKeydown);
     this.#onClose(municipalityId);
@@ -196,6 +246,26 @@ export class ForecastController {
       const nextPageIndex = (this.#pageIndex + 1) % pageCount;
       this.#scrollToPage(nextPageIndex, "smooth");
     });
+    this.#elements.hourlyModeButton.addEventListener("click", () => {
+      if (this.#hourlyModePickerIsOpen) {
+        this.#closeHourlyModePicker();
+      } else {
+        this.#openHourlyModePicker();
+      }
+    });
+    this.#elements.hourlyModeButton.addEventListener(
+      "keydown",
+      this.#handleHourlyModeButtonKeydown,
+    );
+    this.#elements.hourlyModeListbox.addEventListener(
+      "click",
+      this.#handleHourlyModeListboxClick,
+    );
+    this.#elements.hourlyModeListbox.addEventListener(
+      "keydown",
+      this.#handleHourlyModeListboxKeydown,
+    );
+    document.addEventListener("pointerdown", this.#handleDocumentPointerdown);
     this.#elements.pageTrack.addEventListener(
       "scroll",
       this.#handlePageScroll,
@@ -247,6 +317,88 @@ export class ForecastController {
         this.#scrollToPage(nextIndex, "smooth");
       }
     }
+  };
+
+  #handleDocumentPointerdown = (event) => {
+    if (
+      this.#hourlyModePickerIsOpen &&
+      event.target instanceof Node &&
+      !this.#elements.hourlyModePicker.contains(event.target)
+    ) {
+      this.#closeHourlyModePicker();
+    }
+  };
+
+  #handleHourlyModeButtonKeydown = (event) => {
+    if (event.key === "Tab" && this.#hourlyModePickerIsOpen) {
+      this.#closeHourlyModePicker();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      this.#openHourlyModePicker();
+      const selectedIndex = hourlyModes.indexOf(this.#hourlyMode);
+      const targetIndex = event.key === "ArrowDown"
+        ? selectedIndex
+        : Math.max(selectedIndex, 0);
+      this.#elements.hourlyModeOptions[targetIndex]?.focus();
+      return;
+    }
+    if (event.key === "Escape" && this.#hourlyModePickerIsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeHourlyModePicker();
+    }
+  };
+
+  #handleHourlyModeListboxClick = (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    const option = event.target.closest("[data-hourly-mode]");
+    if (!(option instanceof HTMLButtonElement)) {
+      return;
+    }
+    this.#selectHourlyMode(option.dataset.hourlyMode);
+  };
+
+  #handleHourlyModeListboxKeydown = (event) => {
+    const activeIndex = this.#elements.hourlyModeOptions.indexOf(
+      document.activeElement,
+    );
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeHourlyModePicker({ restoreFocus: true });
+      return;
+    }
+    if (event.key === "Tab") {
+      this.#closeHourlyModePicker();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      const option = this.#elements.hourlyModeOptions[activeIndex];
+      if (option !== undefined) {
+        event.preventDefault();
+        this.#selectHourlyMode(option.dataset.hourlyMode);
+      }
+      return;
+    }
+
+    let nextIndex = activeIndex;
+    if (event.key === "ArrowDown") {
+      nextIndex = (activeIndex + 1) % hourlyModes.length;
+    } else if (event.key === "ArrowUp") {
+      nextIndex = (activeIndex - 1 + hourlyModes.length) % hourlyModes.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = hourlyModes.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    this.#elements.hourlyModeOptions[nextIndex]?.focus();
   };
 
   #handlePageScroll = () => {
@@ -374,6 +526,9 @@ export class ForecastController {
     this.#pageResizeFrame = window.requestAnimationFrame(() => {
       this.#pageResizeFrame = null;
       this.#scrollToPage(this.#pageIndex, "auto");
+      if (this.#hourlyModePickerIsOpen) {
+        this.#positionHourlyModeListbox();
+      }
     });
   };
 
@@ -402,6 +557,9 @@ export class ForecastController {
   #settlePage(pageIndex) {
     const pageChanged = pageIndex !== this.#settledPageIndex;
     this.#settledPageIndex = pageIndex;
+    if (pageIndex !== 0) {
+      this.#closeHourlyModePicker();
+    }
 
     // Keep keyboard focus outside a page before removing it from interaction.
     const activeElement = document.activeElement;
@@ -466,6 +624,10 @@ export class ForecastController {
       window.cancelAnimationFrame(this.#dailyScrollResetFrame);
       this.#dailyScrollResetFrame = null;
     }
+    if (this.#hourlyScrollResetFrame !== null) {
+      window.cancelAnimationFrame(this.#hourlyScrollResetFrame);
+      this.#hourlyScrollResetFrame = null;
+    }
   }
 
   #createHourlyItem() {
@@ -493,7 +655,138 @@ export class ForecastController {
         element.querySelector(".hourly-precipitation-probability"),
         HTMLElement,
       ),
+      windDirectionArrow: requiredElement(
+        element.querySelector(".hourly-wind-direction-arrow"),
+        SVGElement,
+      ),
+      windSpeed: requiredElement(
+        element.querySelector(".hourly-wind-speed"),
+        HTMLElement,
+      ),
+      windGust: requiredElement(
+        element.querySelector(".hourly-wind-gust"),
+        HTMLElement,
+      ),
+      modePrecipitationProbability: requiredElement(
+        element.querySelector(".hourly-mode-precipitation-probability"),
+        HTMLElement,
+      ),
+      precipitationAmount: requiredElement(
+        element.querySelector(".hourly-precipitation-amount"),
+        HTMLElement,
+      ),
+      humidity: requiredElement(
+        element.querySelector(".hourly-humidity-value"),
+        HTMLElement,
+      ),
+      humidityUnit: requiredElement(
+        element.querySelector(".hourly-humidity-unit"),
+        HTMLElement,
+      ),
+      apparentTemperature: requiredElement(
+        element.querySelector(".hourly-apparent-temperature"),
+        HTMLElement,
+      ),
     };
+  }
+
+  #openHourlyModePicker() {
+    if (this.#municipality === null) {
+      return;
+    }
+    this.#hourlyModePickerIsOpen = true;
+    this.#elements.hourlyModeListbox.hidden = false;
+    this.#elements.hourlyModeButton.setAttribute("aria-expanded", "true");
+    this.#positionHourlyModeListbox();
+  }
+
+  #positionHourlyModeListbox() {
+    const viewport = this.#elements.currentForecastPage.getBoundingClientRect();
+    const button = this.#elements.hourlyModeButton.getBoundingClientRect();
+    const rootFontSize = Number.parseFloat(
+      window.getComputedStyle(document.documentElement).fontSize,
+    );
+    const gap = (Number.isFinite(rootFontSize) ? rootFontSize : 16) * 0.4;
+    const availableAbove = Math.max(0, button.top - viewport.top - gap);
+    const availableBelow = Math.max(0, viewport.bottom - button.bottom - gap);
+    const contentHeight = this.#elements.hourlyModeListbox.scrollHeight;
+    const placement = contentHeight <= availableAbove ||
+        availableAbove >= availableBelow
+      ? "above"
+      : "below";
+    const availableHeight = placement === "above"
+      ? availableAbove
+      : availableBelow;
+
+    this.#elements.hourlyModeListbox.dataset.placement = placement;
+    this.#elements.hourlyModeListbox.style.setProperty(
+      "--hourly-mode-listbox-max-height",
+      `${Math.floor(availableHeight)}px`,
+    );
+    this.#revealSelectedHourlyMode();
+  }
+
+  #revealSelectedHourlyMode() {
+    const selectedOption = this.#elements.hourlyModeOptions.find(
+      (option) => option.dataset.hourlyMode === this.#hourlyMode,
+    );
+    if (selectedOption === undefined) {
+      return;
+    }
+    const listbox = this.#elements.hourlyModeListbox;
+    const optionTop = selectedOption.offsetTop;
+    const optionBottom = optionTop + selectedOption.offsetHeight;
+    if (optionTop < listbox.scrollTop) {
+      listbox.scrollTop = optionTop;
+    } else if (optionBottom > listbox.scrollTop + listbox.clientHeight) {
+      listbox.scrollTop = optionBottom - listbox.clientHeight;
+    }
+  }
+
+  #closeHourlyModePicker({ restoreFocus = false } = {}) {
+    this.#hourlyModePickerIsOpen = false;
+    this.#elements.hourlyModeListbox.hidden = true;
+    delete this.#elements.hourlyModeListbox.dataset.placement;
+    this.#elements.hourlyModeListbox.style.removeProperty(
+      "--hourly-mode-listbox-max-height",
+    );
+    this.#elements.hourlyModeButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus && this.#municipality !== null) {
+      this.#elements.hourlyModeButton.focus({ preventScroll: true });
+    }
+  }
+
+  #selectHourlyMode(mode) {
+    if (!hourlyModes.includes(mode)) {
+      return;
+    }
+    const scrollAnchor = this.#firstVisibleHourlyForecastKey();
+    const modeChanged = mode !== this.#hourlyMode;
+    this.#hourlyMode = mode;
+    this.#closeHourlyModePicker({ restoreFocus: true });
+    this.#renderHourlyModePicker();
+    if (modeChanged) {
+      this.#renderHourlyForecast();
+      this.#restoreHourlyScroll(scrollAnchor);
+    }
+  }
+
+  #renderHourlyModePicker() {
+    const details = hourlyModeDetails[this.#hourlyMode];
+    this.#elements.hourlyForecastSection.dataset.hourlyMode = this.#hourlyMode;
+    this.#elements.hourlyModeExplanation.textContent = details.explanation ?? "";
+    this.#elements.hourlyModeExplanation.hidden = details.explanation === null;
+    this.#elements.hourlyModeButton.setAttribute(
+      "aria-label",
+      `Datos por hora: ${details.label}`,
+    );
+    setDynamicIcon(this.#elements.hourlyModeCurrentIcon, details.icon);
+    for (const option of this.#elements.hourlyModeOptions) {
+      option.setAttribute(
+        "aria-selected",
+        String(option.dataset.hourlyMode === this.#hourlyMode),
+      );
+    }
   }
 
   #createDailyItem() {
@@ -605,7 +898,10 @@ export class ForecastController {
   #renderHourlyForecast() {
     const hasHourlyForecast = this.#hasHourlyForecast;
     this.#elements.hourlyForecastSection.hidden = !hasHourlyForecast;
-    this.#hourlyItems = this.#hourlyForecastPeriods.map(
+    const visiblePeriods = this.#hourlyMode === "weather"
+      ? this.#hourlyForecastPeriods
+      : this.#hourlyForecastPeriods.filter((period) => period.kind === "forecast");
+    this.#hourlyItems = visiblePeriods.map(
       () => this.#createHourlyItem(),
     );
     this.#elements.hourlyList.replaceChildren(
@@ -622,10 +918,18 @@ export class ForecastController {
           icon,
           temperature,
           precipitationProbability,
+          windDirectionArrow,
+          windSpeed,
+          windGust,
+          modePrecipitationProbability,
+          precipitationAmount,
+          humidity,
+          humidityUnit,
+          apparentTemperature,
         },
       ] of this.#hourlyItems.entries()
     ) {
-      const period = this.#hourlyForecastPeriods[index];
+      const period = visiblePeriods[index];
       if (period === undefined) {
         continue;
       }
@@ -639,9 +943,10 @@ export class ForecastController {
       element.dataset.current = String(isCurrent);
       element.setAttribute(
         "aria-label",
-        formatHourlyForecastLabel(period, isCurrent),
+        formatHourlyForecastLabel(period, isCurrent, this.#hourlyMode),
       );
       if (isForecast) {
+        element.dataset.forecastKey = hourlyForecastKey(period);
         hour.textContent = isCurrent ? "Ahora" : String(period.hour);
         temperature.textContent = period.forecast === null
           ? "—"
@@ -650,6 +955,43 @@ export class ForecastController {
           formatVisiblePrecipitationProbability(period.forecast);
         precipitationProbability.textContent = probabilityText;
         element.dataset.hasPrecipitation = String(probabilityText !== "");
+        const direction = period.forecast?.windDirection ?? null;
+        const arrowRotation = direction === null
+          ? undefined
+          : windFlowRotationByDirection[direction];
+        windDirectionArrow.toggleAttribute("hidden", arrowRotation === undefined);
+        if (arrowRotation !== undefined) {
+          windDirectionArrow.style.setProperty(
+            "--hourly-wind-arrow-rotation",
+            `${arrowRotation}deg`,
+          );
+        } else {
+          windDirectionArrow.style.removeProperty(
+            "--hourly-wind-arrow-rotation",
+          );
+        }
+        const speed = period.forecast?.windSpeedKilometresPerHour ?? null;
+        const gust = period.forecast?.maximumGustKilometresPerHour ?? null;
+        windSpeed.textContent = formatWindValue(speed);
+        windGust.textContent = formatWindValue(gust);
+        modePrecipitationProbability.textContent =
+          formatModePrecipitationProbability(period.forecast);
+        precipitationAmount.textContent = formatPrecipitationAmount(
+          period.forecast?.precipitationMillimetres,
+        );
+        humidity.textContent = period.forecast?.relativeHumidityPercent === null ||
+            period.forecast?.relativeHumidityPercent === undefined
+          ? "—"
+          : String(period.forecast.relativeHumidityPercent);
+        humidityUnit.textContent = period.forecast?.relativeHumidityPercent === null ||
+            period.forecast?.relativeHumidityPercent === undefined
+          ? ""
+          : "%";
+        apparentTemperature.textContent =
+          period.forecast?.apparentTemperatureCelsius === null ||
+            period.forecast?.apparentTemperatureCelsius === undefined
+            ? "—"
+            : `${period.forecast.apparentTemperatureCelsius}°`;
         setDynamicIcon(icon, period.forecast?.condition ?? null);
         continue;
       }
@@ -743,6 +1085,42 @@ export class ForecastController {
     });
   }
 
+  #firstVisibleHourlyForecastKey() {
+    const scrollLeft = this.#elements.hourlyScroller.scrollLeft;
+    const item = this.#hourlyItems.find(({ element }) =>
+      element.dataset.forecastKey !== undefined &&
+      element.offsetLeft + element.offsetWidth > scrollLeft + 1
+    );
+    if (item !== undefined) {
+      return item.element.dataset.forecastKey ?? null;
+    }
+    for (let index = this.#hourlyItems.length - 1; index >= 0; index -= 1) {
+      const forecastKey = this.#hourlyItems[index]?.element.dataset.forecastKey;
+      if (forecastKey !== undefined) {
+        return forecastKey;
+      }
+    }
+    return null;
+  }
+
+  #restoreHourlyScroll(forecastKey) {
+    if (forecastKey === null) {
+      return;
+    }
+    if (this.#hourlyScrollResetFrame !== null) {
+      window.cancelAnimationFrame(this.#hourlyScrollResetFrame);
+    }
+    this.#hourlyScrollResetFrame = window.requestAnimationFrame(() => {
+      this.#hourlyScrollResetFrame = null;
+      const item = this.#hourlyItems.find(
+        ({ element }) => element.dataset.forecastKey === forecastKey,
+      );
+      if (item !== undefined && this.#municipality !== null) {
+        this.#elements.hourlyScroller.scrollLeft = item.element.offsetLeft;
+      }
+    });
+  }
+
   #resetDailyScroll() {
     if (this.#dailyScrollResetFrame !== null) {
       window.cancelAnimationFrame(this.#dailyScrollResetFrame);
@@ -811,6 +1189,10 @@ function captureForecastElements(root) {
       root.querySelector("#forecast-page-announcement"),
       HTMLElement,
     ),
+    currentForecastPage: requiredElement(
+      root.querySelector(".current-forecast-page"),
+      HTMLElement,
+    ),
     locationsButton: requiredElement(
       root.querySelector("#locations-button"),
       HTMLButtonElement,
@@ -863,6 +1245,29 @@ function captureForecastElements(root) {
       root.querySelector("#hourly-forecast"),
       HTMLElement,
     ),
+    hourlyModePicker: requiredElement(
+      root.querySelector(".hourly-mode-picker"),
+      HTMLElement,
+    ),
+    hourlyModeExplanation: requiredElement(
+      root.querySelector("#hourly-mode-explanation"),
+      HTMLElement,
+    ),
+    hourlyModeButton: requiredElement(
+      root.querySelector("#hourly-mode-button"),
+      HTMLButtonElement,
+    ),
+    hourlyModeCurrentIcon: requiredElement(
+      root.querySelector(".hourly-mode-current-icon"),
+      SVGElement,
+    ),
+    hourlyModeListbox: requiredElement(
+      root.querySelector("#hourly-mode-listbox"),
+      HTMLElement,
+    ),
+    hourlyModeOptions: Array.from(
+      root.querySelectorAll(".hourly-mode-option"),
+    ).map((option) => requiredElement(option, HTMLButtonElement)),
     hourlyScroller: requiredElement(
       root.querySelector(".hourly-scroll"),
       HTMLElement,
@@ -962,7 +1367,7 @@ function formatVisiblePrecipitationProbability(forecast) {
     : "";
 }
 
-function formatHourlyForecastLabel(period, isCurrent) {
+function formatHourlyForecastLabel(period, isCurrent, mode) {
   if (period.kind !== "forecast") {
     return `${solarEventLabel(period.kind)} a las ${displaySolarTime(period.time)}`;
   }
@@ -973,10 +1378,77 @@ function formatHourlyForecastLabel(period, isCurrent) {
     return `${hourLabel}. Previsión no disponible`;
   }
 
+  if (mode === "wind") {
+    const direction = period.forecast.windDirection === null
+      ? "Dirección no disponible"
+      : `Dirección ${period.forecast.windDirection}`;
+    const speed = period.forecast.windSpeedKilometresPerHour === null
+      ? "Velocidad no disponible"
+      : `Velocidad ${period.forecast.windSpeedKilometresPerHour} kilómetros por hora`;
+    const gust = period.forecast.maximumGustKilometresPerHour === null
+      ? "Racha máxima no disponible"
+      : `Racha máxima ${period.forecast.maximumGustKilometresPerHour} kilómetros por hora`;
+    return `${hourLabel}. Viento. ${direction}. ${speed}. ${gust}`;
+  }
+  if (mode === "precipitation") {
+    const probability = period.forecast.precipitationProbabilityPercent === null
+      ? "Probabilidad no disponible"
+      : `Probabilidad ${period.forecast.precipitationProbabilityPercent} por ciento`;
+    const amount = precipitationAmountLabel(
+      period.forecast.precipitationMillimetres,
+    );
+    return `${hourLabel}. Precipitación. ${probability}. ${amount}`;
+  }
+  if (mode === "humidity") {
+    const humidity = period.forecast.relativeHumidityPercent === null
+      ? "Humedad relativa no disponible"
+      : `Humedad relativa ${period.forecast.relativeHumidityPercent} por ciento`;
+    return `${hourLabel}. ${humidity}`;
+  }
+  if (mode === "feels-like") {
+    const apparentTemperature = period.forecast.apparentTemperatureCelsius === null
+      ? "Sensación térmica no disponible"
+      : `Sensación térmica ${period.forecast.apparentTemperatureCelsius} grados Celsius`;
+    return `${hourLabel}. ${apparentTemperature}`;
+  }
+
   const precipitation =
     hourlyPrecipitationProbabilityLabel(period.forecast);
   return `${hourLabel}. ${period.forecast.temperatureCelsius} grados Celsius. ` +
     `${period.forecast.description}${precipitation}`;
+}
+
+function hourlyForecastKey(period) {
+  return `${period.date}:${period.hour}`;
+}
+
+function formatWindValue(speed) {
+  return speed === null || speed === undefined ? "—" : String(speed);
+}
+
+function formatModePrecipitationProbability(forecast) {
+  const percent = forecast?.precipitationProbabilityPercent;
+  return percent === null || percent === undefined ? "—" : `${percent}%`;
+}
+
+function formatPrecipitationAmount(amount) {
+  if (amount === null || amount === undefined) {
+    return "—";
+  }
+  if (amount === "trace") {
+    return "Traza";
+  }
+  return `${precipitationAmountFormatter.format(amount)} mm`;
+}
+
+function precipitationAmountLabel(amount) {
+  if (amount === null) {
+    return "Cantidad acumulada no disponible";
+  }
+  if (amount === "trace") {
+    return "Cantidad acumulada inapreciable";
+  }
+  return `Cantidad acumulada ${precipitationAmountFormatter.format(amount)} milímetros`;
 }
 
 function hourlyPrecipitationProbabilityLabel(forecast) {

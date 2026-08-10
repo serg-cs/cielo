@@ -37,6 +37,18 @@ const supportedConditions = new Set([
   "snowflake",
   "sun",
 ]);
+const supportedWindDirections = new Set([
+  "C",
+  "N",
+  "NE",
+  "E",
+  "SE",
+  "S",
+  "SO",
+  "O",
+  "NO",
+  "VRB",
+]);
 
 /** @typedef {import("./municipality-catalog.js").Municipality} Municipality */
 /** @typedef {"loading" | "ready" | "offline" | "error"} ForecastStatus */
@@ -49,6 +61,11 @@ const supportedConditions = new Set([
  * @property {number | "trace" | null} precipitationMillimetres
  * @property {number | null} precipitationProbabilityPercent
  * @property {string | null} precipitationProbabilityPeriod
+ * @property {string | null} windDirection
+ * @property {number | null} windSpeedKilometresPerHour
+ * @property {number | null} maximumGustKilometresPerHour
+ * @property {number | null} relativeHumidityPercent
+ * @property {number | null} apparentTemperatureCelsius
  */
 
 /**
@@ -210,6 +227,11 @@ function validateForecastDocument(document, municipalityId) {
         precipitationMillimetres: hourlyForecast.precip_mm ?? null,
         precipitationProbabilityPercent: null,
         precipitationProbabilityPeriod: null,
+        windDirection: hourlyForecast.wind_dir ?? null,
+        windSpeedKilometresPerHour: hourlyForecast.wind_kmh ?? null,
+        maximumGustKilometresPerHour: hourlyForecast.gust_kmh ?? null,
+        relativeHumidityPercent: hourlyForecast.humidity_pct ?? null,
+        apparentTemperatureCelsius: hourlyForecast.feels_like_c ?? null,
       });
     }
   }
@@ -1179,7 +1201,7 @@ function isForecastEvent(value) {
 
 /** @param {unknown} value */
 function isForecastHour(value) {
-  return (
+  const baseIsValid = (
     typeof value === "object" &&
     value !== null &&
     "hour" in value &&
@@ -1207,6 +1229,43 @@ function isForecastHour(value) {
       )
     )
   );
+  if (!baseIsValid) {
+    return false;
+  }
+  return (
+    (
+      !("wind_dir" in value) ||
+      value.wind_dir === null ||
+      typeof value.wind_dir === "string" && supportedWindDirections.has(value.wind_dir)
+    ) &&
+    (
+      !("wind_kmh" in value) ||
+      isNullableUnsignedInteger(value.wind_kmh)
+    ) &&
+    (
+      !("gust_kmh" in value) ||
+      isNullableUnsignedInteger(value.gust_kmh)
+    ) &&
+    (
+      !("humidity_pct" in value) ||
+      value.humidity_pct === null ||
+      Number.isInteger(value.humidity_pct) &&
+        value.humidity_pct >= 0 &&
+        value.humidity_pct <= 100
+    ) &&
+    (
+      !("feels_like_c" in value) ||
+      value.feels_like_c === null ||
+      Number.isInteger(value.feels_like_c) &&
+        value.feels_like_c >= temperatureMinimum &&
+        value.feels_like_c <= temperatureMaximum
+    )
+  );
+}
+
+function isNullableUnsignedInteger(value) {
+  return value === null ||
+    Number.isInteger(value) && value >= 0 && value <= 65_535;
 }
 
 /** @param {unknown} value */
@@ -1370,7 +1429,14 @@ function currentConditionsAreEqual(left, right) {
       left.precipitationProbabilityPercent ===
         right.precipitationProbabilityPercent &&
       left.precipitationProbabilityPeriod ===
-        right.precipitationProbabilityPeriod;
+        right.precipitationProbabilityPeriod &&
+      left.windDirection === right.windDirection &&
+      left.windSpeedKilometresPerHour ===
+        right.windSpeedKilometresPerHour &&
+      left.maximumGustKilometresPerHour ===
+        right.maximumGustKilometresPerHour &&
+      left.relativeHumidityPercent === right.relativeHumidityPercent &&
+      left.apparentTemperatureCelsius === right.apparentTemperatureCelsius;
 }
 
 function dailySummariesAreEqual(left, right) {

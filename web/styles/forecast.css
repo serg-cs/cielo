@@ -250,6 +250,122 @@
     transform: translateX(-50%);
   }
 
+  .hourly-forecast-toolbar {
+    position: relative;
+    z-index: 6;
+    display: flex;
+    min-height: 2.75rem;
+    margin-bottom: 0.45rem;
+    align-items: center;
+  }
+
+  .hourly-mode-explanation {
+    max-width: calc(100% - 4.5rem);
+    color: var(--cielo-color-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.15;
+  }
+
+  .hourly-mode-picker {
+    position: relative;
+    margin-left: auto;
+  }
+
+  .hourly-mode-button {
+    display: flex;
+    min-width: 4rem;
+    height: 2.75rem;
+    padding: 0 0.7rem;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: var(--cielo-radius-pill);
+    outline: none;
+    color: var(--cielo-color-text);
+    background: var(--cielo-color-surface);
+    cursor: pointer;
+    gap: 0.45rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hourly-mode-current-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .hourly-mode-chevron {
+    width: 0.95rem;
+    height: 0.95rem;
+    color: var(--cielo-color-muted);
+    transition: transform 160ms ease;
+  }
+
+  .hourly-mode-button[aria-expanded="true"] .hourly-mode-chevron {
+    transform: rotate(180deg);
+  }
+
+  .hourly-mode-button:focus-visible,
+  .hourly-mode-option:focus-visible {
+    outline: var(--cielo-focus-outline);
+    outline-offset: 0.12rem;
+  }
+
+  .hourly-mode-listbox {
+    position: absolute;
+    z-index: 7;
+    bottom: calc(100% + 0.4rem);
+    right: 0;
+    width: 12.5rem;
+    max-height: var(
+      --hourly-mode-listbox-max-height,
+      calc(100dvh - 1rem)
+    );
+    padding: 0.35rem;
+    overflow-y: auto;
+    border: 1px solid var(--cielo-color-border);
+    border-radius: 0.9rem;
+    background: var(--cielo-color-forecast-background);
+    box-shadow: 0 0.65rem 1.8rem rgb(15 37 53 / 35%);
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .hourly-mode-listbox[data-placement="below"] {
+    top: calc(100% + 0.4rem);
+    bottom: auto;
+  }
+
+  .hourly-mode-option {
+    display: flex;
+    width: 100%;
+    min-height: 2.65rem;
+    padding: 0.55rem 0.7rem;
+    border: 0;
+    border-radius: 0.65rem;
+    outline: none;
+    color: var(--cielo-color-text);
+    background: var(--cielo-color-forecast-background);
+    cursor: pointer;
+    gap: 0.65rem;
+    align-items: center;
+    text-align: left;
+  }
+
+  .hourly-mode-option .cielo-icon {
+    width: 1.15rem;
+    height: 1.15rem;
+    color: var(--cielo-color-muted);
+  }
+
+  .hourly-mode-option[aria-selected="true"] {
+    background: var(--cielo-color-surface);
+    font-weight: 650;
+  }
+
+  .hourly-mode-option[aria-selected="true"] .cielo-icon {
+    color: var(--cielo-color-accent);
+  }
+
   .hourly-scroll {
     width: 100%;
     overflow-x: auto;
@@ -368,6 +484,128 @@
 
   .hourly-precipitation-probability:empty {
     display: none;
+  }
+
+  .hourly-wind-reading,
+  .hourly-precipitation-reading,
+  .hourly-humidity-reading,
+  .hourly-apparent-temperature {
+    display: none;
+  }
+
+  .hourly-forecast[data-hourly-mode="precipitation"] .hourly-period {
+    grid-template-rows: 1.1rem minmax(0, 1fr);
+  }
+
+  .hourly-forecast[data-hourly-mode="wind"] .hourly-period,
+  .hourly-forecast[data-hourly-mode="humidity"] .hourly-period,
+  .hourly-forecast[data-hourly-mode="feels-like"] .hourly-period {
+    grid-template-rows: 1.1rem minmax(2rem, 1fr) 1.25rem;
+  }
+
+  .hourly-forecast[data-hourly-mode="wind"] .hourly-condition-icon,
+  .hourly-forecast[data-hourly-mode="precipitation"] .hourly-condition-icon,
+  .hourly-forecast[data-hourly-mode]:not([data-hourly-mode="weather"])
+    .hourly-precipitation,
+  .hourly-forecast[data-hourly-mode]:not([data-hourly-mode="weather"])
+    .hourly-temperature {
+    display: none;
+  }
+
+  .hourly-forecast[data-hourly-mode="precipitation"]
+    .hourly-precipitation-reading {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    grid-row: 2;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hourly-forecast[data-hourly-mode="wind"] .hourly-wind-reading {
+    display: contents;
+  }
+
+  .hourly-forecast[data-hourly-mode="humidity"] .hourly-humidity-reading {
+    display: flex;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 620;
+    grid-row: 3;
+    line-height: 1.15;
+    align-items: baseline;
+  }
+
+  .hourly-forecast[data-hourly-mode="feels-like"]
+    .hourly-apparent-temperature {
+    display: block;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 620;
+    grid-row: 3;
+    line-height: 1.15;
+  }
+
+  .hourly-humidity-unit {
+    margin-left: 0.04em;
+    color: var(--cielo-color-muted);
+    font-size: 0.68em;
+    font-weight: 400;
+  }
+
+  .hourly-wind-direction-arrow {
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--cielo-color-accent);
+    align-self: center;
+    grid-row: 2;
+    transform: rotate(var(--hourly-wind-arrow-rotation, 0deg));
+    transform-origin: center;
+  }
+
+  .hourly-wind-speed-reading {
+    display: flex;
+    gap: 0.06rem;
+    font-variant-numeric: tabular-nums;
+    grid-row: 3;
+    line-height: 1.15;
+    align-items: baseline;
+  }
+
+  .hourly-wind-speed,
+  .hourly-precipitation-amount {
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .hourly-precipitation-amount {
+    margin-top: 0.28rem;
+  }
+
+  .hourly-wind-speed {
+    font-size: 1rem;
+    font-weight: 620;
+  }
+
+  .hourly-wind-gust {
+    font-size: 0.72rem;
+    font-weight: 620;
+  }
+
+  .hourly-wind-speed-separator {
+    color: var(--cielo-color-muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+  }
+
+  .hourly-mode-precipitation-probability {
+    color: var(--cielo-color-accent);
+    font-size: 1rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 620;
+    line-height: 1.15;
   }
 
   .daily-forecast {
@@ -562,7 +800,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .forecast-page-dot {
+    .forecast-page-dot,
+    .hourly-mode-chevron {
       transition: none;
     }
   }
@@ -575,7 +814,9 @@
 
   @media (hover: hover) and (pointer: fine) {
     .locations-button:hover,
-    .forecast-page-indicator:hover {
+    .forecast-page-indicator:hover,
+    .hourly-mode-button:hover,
+    .hourly-mode-option:hover {
       background: var(--cielo-color-surface);
     }
   }

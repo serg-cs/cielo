@@ -89,6 +89,11 @@ fn parses_and_orders_forecast_temperatures() {
                         condition: WeatherCondition::CloudSun,
                         description: "Intervalos nubosos".to_owned(),
                         precipitation_amount: None,
+                        wind_direction: None,
+                        wind_speed_kilometres_per_hour: None,
+                        maximum_gust_kilometres_per_hour: None,
+                        relative_humidity_percent: None,
+                        apparent_temperature_celsius: None,
                     },
                     HourlyForecast {
                         hour: 11,
@@ -96,6 +101,11 @@ fn parses_and_orders_forecast_temperatures() {
                         condition: WeatherCondition::Moon,
                         description: "Despejado".to_owned(),
                         precipitation_amount: None,
+                        wind_direction: None,
+                        wind_speed_kilometres_per_hour: None,
+                        maximum_gust_kilometres_per_hour: None,
+                        relative_humidity_percent: None,
+                        apparent_temperature_celsius: None,
                     },
                 ],
             },
@@ -110,6 +120,11 @@ fn parses_and_orders_forecast_temperatures() {
                     condition: WeatherCondition::CloudDrizzle,
                     description: "Lluvia débil".to_owned(),
                     precipitation_amount: None,
+                    wind_direction: None,
+                    wind_speed_kilometres_per_hour: None,
+                    maximum_gust_kilometres_per_hour: None,
+                    relative_humidity_percent: None,
+                    apparent_temperature_celsius: None,
                 }],
             },
         ]
@@ -172,6 +187,128 @@ fn parses_hourly_precipitation_amounts_and_probability_periods() {
         day.hourly_forecasts[1].precipitation_amount,
         Some(PrecipitationAmount::MeasuredTenthsOfMillimetre(4))
     );
+}
+
+#[test]
+fn parses_hourly_wind_gusts_humidity_and_apparent_temperature() {
+    let archive = forecast_archive(
+        "localidad_h_28079.json",
+        r#"{
+            "root": {
+                "id": "28079",
+                "elaborado": "2026-07-19T08:00:00",
+                "nombre": "Madrid",
+                "provincia": "Madrid",
+                "prediccion": {
+                    "dia": [{
+                        "fecha": "2026-07-19",
+                        "orto": "06:54",
+                        "ocaso": "21:43",
+                        "estado_cielo": {
+                            "periodo": "10",
+                            "valor": "11",
+                            "descripcion": "Despejado"
+                        },
+                        "temperatura": {"periodo": "10", "valor": "27"},
+                        "viento": {
+                            "periodo": "10",
+                            "direccion": "ne",
+                            "velocidad": 18
+                        },
+                        "racha_max": {"periodo": "10", "value": "32"},
+                        "humedad_relativa": {
+                            "periodo": "10",
+                            "valor": 64
+                        },
+                        "sens_termica": {"periodo": "10", "valor": "29"}
+                    }]
+                }
+            }
+        }"#,
+    );
+
+    let forecasts = parse_forecast_archive(&archive).expect("measurements should parse");
+    let hour = &forecasts[0].daily_forecasts[0].hourly_forecasts[0];
+
+    assert_eq!(hour.wind_direction.as_deref(), Some("NE"));
+    assert_eq!(hour.wind_speed_kilometres_per_hour, Some(18));
+    assert_eq!(hour.maximum_gust_kilometres_per_hour, Some(32));
+    assert_eq!(hour.relative_humidity_percent, Some(64));
+    assert_eq!(hour.apparent_temperature_celsius, Some(29));
+}
+
+#[test]
+fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
+    for (wind, humidity, apparent_temperature) in [
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "direccion": ["norte"],
+                "velocidad": [18]
+            }),
+            serde_json::json!({"periodo": "10", "valor": 64}),
+            serde_json::json!({"periodo": "10", "valor": 29}),
+        ),
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "direccion": ["N"],
+                "velocidad": [-1]
+            }),
+            serde_json::json!({"periodo": "10", "valor": 64}),
+            serde_json::json!({"periodo": "10", "valor": 29}),
+        ),
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "direccion": ["N"],
+                "velocidad": [18]
+            }),
+            serde_json::json!({"periodo": "10", "valor": 101}),
+            serde_json::json!({"periodo": "10", "valor": 29}),
+        ),
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "direccion": ["N"],
+                "velocidad": [18]
+            }),
+            serde_json::json!({"periodo": "10", "valor": 64}),
+            serde_json::json!({"periodo": "10", "valor": "calor"}),
+        ),
+    ] {
+        let archive = forecast_archive(
+            "localidad_h_28079.json",
+            &serde_json::json!({
+                "root": {
+                    "id": "28079",
+                    "elaborado": "2026-07-19T08:00:00",
+                    "nombre": "Madrid",
+                    "provincia": "Madrid",
+                    "prediccion": {
+                        "dia": [{
+                            "fecha": "2026-07-19",
+                            "orto": "06:54",
+                            "ocaso": "21:43",
+                            "estado_cielo": {
+                                "periodo": "10",
+                                "valor": "11",
+                                "descripcion": "Despejado"
+                            },
+                            "temperatura": {"periodo": "10", "valor": "27"},
+                            "viento": wind,
+                            "racha_max": {"periodo": "10", "value": "32"},
+                            "humedad_relativa": humidity,
+                            "sens_termica": apparent_temperature
+                        }]
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        assert!(parse_forecast_archive(&archive).is_err());
+    }
 }
 
 #[test]
@@ -536,6 +673,11 @@ fn normalizes_scalar_sky_state_shape() {
                 condition: WeatherCondition::Sun,
                 description: "Despejado".to_owned(),
                 precipitation_amount: None,
+                wind_direction: None,
+                wind_speed_kilometres_per_hour: None,
+                maximum_gust_kilometres_per_hour: None,
+                relative_humidity_percent: None,
+                apparent_temperature_celsius: None,
             }],
         }]
     );
