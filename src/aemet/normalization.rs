@@ -855,7 +855,7 @@ impl SourceValue {
                 value.to_string().parse().ok()
             }
             Self::Decimal(_) => None,
-            Self::Text(value) => value.trim().parse().ok(),
+            Self::Text(value) => parse_non_negative_integer_text(value),
         }
     }
 
@@ -873,6 +873,17 @@ impl SourceValue {
     fn is_empty_text(&self) -> bool {
         matches!(self, Self::Text(value) if value.trim().is_empty())
     }
+}
+
+fn parse_non_negative_integer_text(value: &str) -> Option<u16> {
+    let value = value.trim();
+    if let Some((integer, fractional)) = value.split_once('.') {
+        if fractional.is_empty() || !fractional.bytes().all(|byte| byte == b'0') {
+            return None;
+        }
+        return integer.parse().ok();
+    }
+    value.parse().ok()
 }
 
 fn parse_precipitation_tenths(value: &str) -> Option<u16> {

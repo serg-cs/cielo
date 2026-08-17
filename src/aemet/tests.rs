@@ -215,7 +215,7 @@ fn parses_hourly_wind_gusts_humidity_and_apparent_temperature() {
                             "direccion": "ne",
                             "velocidad": 18
                         },
-                        "racha_max": {"periodo": "10", "value": "32"},
+                        "racha_max": {"periodo": "10", "value": "0.0"},
                         "humedad_relativa": {
                             "periodo": "10",
                             "valor": 64
@@ -232,20 +232,21 @@ fn parses_hourly_wind_gusts_humidity_and_apparent_temperature() {
 
     assert_eq!(hour.wind_direction.as_deref(), Some("NE"));
     assert_eq!(hour.wind_speed_kilometres_per_hour, Some(18));
-    assert_eq!(hour.maximum_gust_kilometres_per_hour, Some(32));
+    assert_eq!(hour.maximum_gust_kilometres_per_hour, Some(0));
     assert_eq!(hour.relative_humidity_percent, Some(64));
     assert_eq!(hour.apparent_temperature_celsius, Some(29));
 }
 
 #[test]
-fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
-    for (wind, humidity, apparent_temperature) in [
+fn rejects_invalid_hourly_measurement_values() {
+    for (wind, maximum_gust, humidity, apparent_temperature) in [
         (
             serde_json::json!({
                 "periodo": "10",
                 "direccion": ["norte"],
                 "velocidad": [18]
             }),
+            serde_json::json!({"periodo": "10", "value": "32"}),
             serde_json::json!({"periodo": "10", "valor": 64}),
             serde_json::json!({"periodo": "10", "valor": 29}),
         ),
@@ -255,6 +256,7 @@ fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
                 "direccion": ["N"],
                 "velocidad": [-1]
             }),
+            serde_json::json!({"periodo": "10", "value": "32"}),
             serde_json::json!({"periodo": "10", "valor": 64}),
             serde_json::json!({"periodo": "10", "valor": 29}),
         ),
@@ -264,6 +266,7 @@ fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
                 "direccion": ["N"],
                 "velocidad": [18]
             }),
+            serde_json::json!({"periodo": "10", "value": "32"}),
             serde_json::json!({"periodo": "10", "valor": 101}),
             serde_json::json!({"periodo": "10", "valor": 29}),
         ),
@@ -273,8 +276,19 @@ fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
                 "direccion": ["N"],
                 "velocidad": [18]
             }),
+            serde_json::json!({"periodo": "10", "value": "32"}),
             serde_json::json!({"periodo": "10", "valor": 64}),
             serde_json::json!({"periodo": "10", "valor": "calor"}),
+        ),
+        (
+            serde_json::json!({
+                "periodo": "10",
+                "direccion": ["N"],
+                "velocidad": [18]
+            }),
+            serde_json::json!({"periodo": "10", "value": "0.1"}),
+            serde_json::json!({"periodo": "10", "valor": 64}),
+            serde_json::json!({"periodo": "10", "valor": 29}),
         ),
     ] {
         let archive = forecast_archive(
@@ -297,7 +311,7 @@ fn rejects_invalid_hourly_wind_humidity_and_apparent_temperature_values() {
                             },
                             "temperatura": {"periodo": "10", "valor": "27"},
                             "viento": wind,
-                            "racha_max": {"periodo": "10", "value": "32"},
+                            "racha_max": maximum_gust,
                             "humedad_relativa": humidity,
                             "sens_termica": apparent_temperature
                         }]
