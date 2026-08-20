@@ -810,6 +810,47 @@
     .forecast-header {
       padding-top: calc(1.25rem + env(safe-area-inset-top));
     }
+
+    /* Preserve the compact mobile proportions on larger screens. */
+    .daily-forecast {
+      max-width: var(--cielo-content-width);
+      padding-inline: var(--forecast-data-inset);
+    }
+
+    .daily-scroll {
+      --daily-card-height: 33.25rem;
+    }
+
+    .daily-table {
+      --daily-condition-gap: 1.25rem;
+      --daily-label-column-width: 37.5%;
+      --daily-probability-column-width: 15%;
+      --daily-row-height: 4.75rem;
+      --daily-value-gap: 0.45rem;
+    }
+
+    .daily-table .daily-weekday {
+      grid-template-columns: minmax(0, 1fr) 2rem;
+      font-size: 1.3rem;
+    }
+
+    .daily-condition-icon {
+      width: 2rem;
+      height: 2rem;
+    }
+
+    .daily-table .daily-precipitation-probability-cell {
+      font-size: 1.15rem;
+    }
+
+    .daily-precipitation-probability-icon {
+      width: 1.05rem;
+      height: 1.05rem;
+    }
+
+    .daily-table .daily-extrema-pair {
+      font-size: 1.4rem;
+    }
   }
 
   @media (hover: hover) and (pointer: fine) {
