@@ -1,6 +1,7 @@
 name: Build and deploy app
 
 on:
+  workflow_dispatch:
   workflow_call:
     secrets:
       AWS_ACCESS_KEY_ID:
