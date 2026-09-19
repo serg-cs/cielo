@@ -968,7 +968,6 @@ struct GeneratedDocumentInvariants {
     classes: HashSet<String>,
     use_targets: Vec<String>,
     symbol_count: usize,
-    page_indicator_is_accessible_button: bool,
 }
 
 fn assert_generated_document_invariants(dom: &RcDom) {
@@ -979,10 +978,6 @@ fn assert_generated_document_invariants(dom: &RcDom) {
     assert_generated_document_classes(&invariants);
 
     assert_eq!(invariants.symbol_count, 29);
-    assert!(
-        invariants.page_indicator_is_accessible_button,
-        "forecast page indicator should be an accessible button"
-    );
     for target in invariants.use_targets {
         assert!(
             invariants.ids.contains(&target),
@@ -1022,9 +1017,6 @@ fn assert_generated_document_ids(invariants: &GeneratedDocumentInvariants) {
         "current-maximum-temperature",
         "current-temperature-announcement",
         "current-conditions-message",
-        "forecast-pages",
-        "forecast-page-indicator",
-        "forecast-page-announcement",
         "hourly-forecast",
         "hourly-mode-explanation",
         "hourly-mode-button",
@@ -1045,8 +1037,12 @@ fn assert_generated_document_ids(invariants: &GeneratedDocumentInvariants) {
 
 fn assert_generated_document_classes(invariants: &GeneratedDocumentInvariants) {
     for required_class in [
+        "cielo-view",
         "forecast-screen",
+        "forecast-primary",
+        "forecast-outlook",
         "forecast-current-summary",
+        "forecast-current-details",
         "current-reading",
         "current-daily-extrema",
         "daily-extrema-pair",
@@ -1055,7 +1051,6 @@ fn assert_generated_document_classes(invariants: &GeneratedDocumentInvariants) {
         "daily-extreme-temperature",
         "daily-minimum-extreme",
         "daily-maximum-extreme",
-        "forecast-page",
         "hourly-scroll",
         "hourly-mode-explanation",
         "hourly-mode-picker",
@@ -1075,7 +1070,8 @@ fn assert_generated_document_classes(invariants: &GeneratedDocumentInvariants) {
         "hourly-humidity-value",
         "hourly-humidity-unit",
         "hourly-apparent-temperature",
-        "daily-scroll",
+        "daily-forecast",
+        "daily-panel",
         "daily-weekday",
         "daily-weekday-details",
         "daily-weekday-name",
@@ -1123,19 +1119,6 @@ fn collect_document_invariants(handle: &Handle, invariants: &mut GeneratedDocume
         }
 
         match name.local.as_ref() {
-            "button" if id.as_deref() == Some("forecast-page-indicator") => {
-                assert_eq!(
-                    attribute_value(&attributes, "type").as_deref(),
-                    Some("button"),
-                    "forecast page indicator should not submit forms"
-                );
-                assert_eq!(
-                    attribute_value(&attributes, "aria-label").as_deref(),
-                    Some("Mostrar la siguiente página de previsión"),
-                    "forecast page indicator should describe its action"
-                );
-                invariants.page_indicator_is_accessible_button = true;
-            }
             "symbol" => {
                 invariants.symbol_count += 1;
                 assert!(

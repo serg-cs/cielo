@@ -7,10 +7,6 @@ button {
   touch-action: none;
 }
 
-.cielo-forecast-view[data-active="true"] {
-  visibility: visible;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

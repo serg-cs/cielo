@@ -1,11 +1,15 @@
       <section
         id="forecast-view"
-        class="cielo-forecast-view"
-        aria-labelledby="municipality-title"
-        aria-describedby="forecast-instructions"
+        class="cielo-view cielo-forecast-view"
         hidden
       >
-        <div class="forecast-screen" tabindex="-1">
+        <div
+          class="forecast-screen"
+          tabindex="0"
+          role="region"
+          aria-labelledby="municipality-title"
+          aria-describedby="forecast-instructions"
+        >
           <header class="forecast-header">
             <button
               id="locations-button"
@@ -20,178 +24,166 @@
             <h1 id="municipality-title" class="forecast-heading">
               <span id="municipality-title-text" class="municipality-title-text"></span>
             </h1>
-          </header>
-          <div class="forecast-current-summary">
-            <div
-              class="current-conditions"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              <span class="current-reading" aria-hidden="true">
-                <span id="current-temperature-value">—</span>
-                <svg
-                  id="current-condition-icon"
-                  class="cielo-icon current-condition-icon"
-                  aria-hidden="true"
-                  hidden
-                >
-                  <use></use>
+            <div class="hourly-mode-picker" hidden>
+              <button
+                id="hourly-mode-button"
+                class="hourly-mode-button"
+                type="button"
+                aria-label="Datos por hora: Tiempo"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="hourly-mode-listbox"
+              >
+                <svg class="cielo-icon hourly-mode-current-icon" aria-hidden="true">
+                  <use href="#cielo-icon-cloud-sun"></use>
                 </svg>
-              </span>
-              <span id="current-temperature-announcement" class="visually-hidden">
-                Temperatura actual no disponible
-              </span>
-              <span id="current-conditions-message" class="current-conditions-message">
-                Cargando previsión…
-              </span>
-            </div>
-          </div>
-          <div
-            id="forecast-pages"
-            class="forecast-pages"
-            aria-label="Páginas de previsión"
-            tabindex="0"
-          >
-            <section
-              class="forecast-page current-forecast-page"
-              data-forecast-page
-              data-page-label="Condiciones actuales y previsión por horas"
-              aria-label="Condiciones actuales y previsión por horas"
-            >
-              <div class="forecast-page-content current-forecast-details">
-                <span
-                  id="current-daily-extrema"
-                  class="daily-extrema-pair current-daily-extrema"
-                  aria-hidden="true"
-                  hidden
+                <svg class="cielo-icon hourly-mode-chevron" aria-hidden="true">
+                  <use href="#cielo-icon-chevron-down"></use>
+                </svg>
+              </button>
+              <div
+                id="hourly-mode-listbox"
+                class="hourly-mode-listbox"
+                role="listbox"
+                aria-label="Datos por hora"
+                hidden
+              >
+                <button
+                  class="hourly-mode-option"
+                  type="button"
+                  role="option"
+                  aria-selected="true"
+                  data-hourly-mode="weather"
+                  tabindex="-1"
                 >
-                  <span class="daily-extreme daily-minimum-extreme">
-                    <svg class="cielo-icon daily-extreme-icon" aria-hidden="true">
-                      <use href="#cielo-icon-move-down"></use>
-                    </svg>
-                    <span
-                      id="current-minimum-temperature"
-                      class="daily-extreme-temperature"
-                    ></span>
-                  </span>
-                  <span class="daily-extreme daily-maximum-extreme">
-                    <svg class="cielo-icon daily-extreme-icon" aria-hidden="true">
-                      <use href="#cielo-icon-move-up"></use>
-                    </svg>
-                    <span
-                      id="current-maximum-temperature"
-                      class="daily-extreme-temperature"
-                    ></span>
-                  </span>
-                </span>
-                <span
-                  id="current-condition-description"
-                  class="current-condition-description"
-                  hidden
-                ></span>
+                  <svg class="cielo-icon" aria-hidden="true">
+                    <use href="#cielo-icon-cloud-sun"></use>
+                  </svg>
+                  <span>Tiempo</span>
+                </button>
+                <button
+                  class="hourly-mode-option"
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  data-hourly-mode="wind"
+                  tabindex="-1"
+                >
+                  <svg class="cielo-icon" aria-hidden="true">
+                    <use href="#cielo-icon-wind"></use>
+                  </svg>
+                  <span>Viento</span>
+                </button>
+                <button
+                  class="hourly-mode-option"
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  data-hourly-mode="precipitation"
+                  tabindex="-1"
+                >
+                  <svg class="cielo-icon" aria-hidden="true">
+                    <use href="#cielo-icon-umbrella"></use>
+                  </svg>
+                  <span>Precipitación</span>
+                </button>
+                <button
+                  class="hourly-mode-option"
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  data-hourly-mode="humidity"
+                  tabindex="-1"
+                >
+                  <svg class="cielo-icon" aria-hidden="true">
+                    <use href="#cielo-icon-droplet"></use>
+                  </svg>
+                  <span>Humedad</span>
+                </button>
+                <button
+                  class="hourly-mode-option"
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  data-hourly-mode="feels-like"
+                  tabindex="-1"
+                >
+                  <svg class="cielo-icon" aria-hidden="true">
+                    <use href="#cielo-icon-thermometer"></use>
+                  </svg>
+                  <span>Sensación</span>
+                </button>
               </div>
-              <section id="hourly-forecast" class="hourly-forecast" hidden>
-                <h2 id="hourly-forecast-title" class="visually-hidden">Previsión por horas</h2>
-                <div class="hourly-forecast-toolbar">
-                  <span
-                    id="hourly-mode-explanation"
-                    class="hourly-mode-explanation"
+            </div>
+          </header>
+          <div class="forecast-primary">
+            <div class="forecast-current-summary">
+              <div
+                class="current-conditions"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span class="current-reading" aria-hidden="true">
+                  <span id="current-temperature-value">—</span>
+                  <svg
+                    id="current-condition-icon"
+                    class="cielo-icon current-condition-icon"
                     aria-hidden="true"
                     hidden
+                  >
+                    <use></use>
+                  </svg>
+                </span>
+                <span id="current-temperature-announcement" class="visually-hidden">
+                  Temperatura actual no disponible
+                </span>
+                <span id="current-conditions-message" class="current-conditions-message">
+                  Cargando previsión…
+                </span>
+              </div>
+            </div>
+            <div class="forecast-current-details">
+              <span
+                id="current-daily-extrema"
+                class="daily-extrema-pair current-daily-extrema"
+                aria-hidden="true"
+                hidden
+              >
+                <span class="daily-extreme daily-minimum-extreme">
+                  <svg class="cielo-icon daily-extreme-icon" aria-hidden="true">
+                    <use href="#cielo-icon-move-down"></use>
+                  </svg>
+                  <span
+                    id="current-minimum-temperature"
+                    class="daily-extreme-temperature"
                   ></span>
-                  <div class="hourly-mode-picker">
-                    <button
-                      id="hourly-mode-button"
-                      class="hourly-mode-button"
-                      type="button"
-                      aria-label="Datos por hora: Tiempo"
-                      aria-haspopup="listbox"
-                      aria-expanded="false"
-                      aria-controls="hourly-mode-listbox"
-                    >
-                      <svg class="cielo-icon hourly-mode-current-icon" aria-hidden="true">
-                        <use href="#cielo-icon-cloud-sun"></use>
-                      </svg>
-                      <svg class="cielo-icon hourly-mode-chevron" aria-hidden="true">
-                        <use href="#cielo-icon-chevron-down"></use>
-                      </svg>
-                    </button>
-                    <div
-                      id="hourly-mode-listbox"
-                      class="hourly-mode-listbox"
-                      role="listbox"
-                      aria-label="Datos por hora"
-                      hidden
-                    >
-                      <button
-                        class="hourly-mode-option"
-                        type="button"
-                        role="option"
-                        aria-selected="true"
-                        data-hourly-mode="weather"
-                        tabindex="-1"
-                      >
-                        <svg class="cielo-icon" aria-hidden="true">
-                          <use href="#cielo-icon-cloud-sun"></use>
-                        </svg>
-                        <span>Tiempo</span>
-                      </button>
-                      <button
-                        class="hourly-mode-option"
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        data-hourly-mode="wind"
-                        tabindex="-1"
-                      >
-                        <svg class="cielo-icon" aria-hidden="true">
-                          <use href="#cielo-icon-wind"></use>
-                        </svg>
-                        <span>Viento</span>
-                      </button>
-                      <button
-                        class="hourly-mode-option"
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        data-hourly-mode="precipitation"
-                        tabindex="-1"
-                      >
-                        <svg class="cielo-icon" aria-hidden="true">
-                          <use href="#cielo-icon-umbrella"></use>
-                        </svg>
-                        <span>Precipitación</span>
-                      </button>
-                      <button
-                        class="hourly-mode-option"
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        data-hourly-mode="humidity"
-                        tabindex="-1"
-                      >
-                        <svg class="cielo-icon" aria-hidden="true">
-                          <use href="#cielo-icon-droplet"></use>
-                        </svg>
-                        <span>Humedad</span>
-                      </button>
-                      <button
-                        class="hourly-mode-option"
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        data-hourly-mode="feels-like"
-                        tabindex="-1"
-                      >
-                        <svg class="cielo-icon" aria-hidden="true">
-                          <use href="#cielo-icon-thermometer"></use>
-                        </svg>
-                        <span>Sensación</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                </span>
+                <span class="daily-extreme daily-maximum-extreme">
+                  <svg class="cielo-icon daily-extreme-icon" aria-hidden="true">
+                    <use href="#cielo-icon-move-up"></use>
+                  </svg>
+                  <span
+                    id="current-maximum-temperature"
+                    class="daily-extreme-temperature"
+                  ></span>
+                </span>
+              </span>
+              <span
+                id="current-condition-description"
+                class="current-condition-description"
+                hidden
+              ></span>
+            </div>
+            <div class="forecast-outlook">
+              <section id="hourly-forecast" class="hourly-forecast" hidden>
+                <h2 id="hourly-forecast-title" class="visually-hidden">Previsión por horas</h2>
+                <span
+                  id="hourly-mode-explanation"
+                  class="hourly-mode-explanation"
+                  aria-hidden="true"
+                  hidden
+                ></span>
                 <div
                   class="hourly-scroll"
                   tabindex="0"
@@ -200,18 +192,9 @@
                   <ul id="hourly-forecast-list" class="hourly-list"></ul>
                 </div>
               </section>
-            </section>
-            <section
-              class="forecast-page daily-forecast-page"
-              data-forecast-page
-              data-page-label="Previsión diaria"
-              aria-label="Previsión diaria"
-              aria-hidden="true"
-              inert
-            >
               <section class="daily-forecast" aria-labelledby="daily-forecast-title">
                 <h2 id="daily-forecast-title" class="visually-hidden">Previsión diaria</h2>
-                <div class="daily-scroll" tabindex="-1">
+                <div class="daily-panel">
                   <table class="daily-table">
                     <caption class="visually-hidden">
                       Probabilidad de precipitación y temperaturas mínimas y máximas previstas por día
@@ -220,23 +203,10 @@
                   </table>
                 </div>
               </section>
-            </section>
+            </div>
           </div>
-          <button
-            id="forecast-page-indicator"
-            class="forecast-page-indicator"
-            type="button"
-            aria-label="Mostrar la siguiente página de previsión"
-          ></button>
-          <p
-            id="forecast-page-announcement"
-            class="visually-hidden"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          ></p>
           <p id="forecast-instructions" class="visually-hidden">
-            Pulsa el botón de ubicaciones para elegir otra ubicación. Desliza horizontalmente, usa las flechas izquierda y derecha o pulsa el indicador para cambiar de página. Desde la última página, el indicador vuelve a la primera. También puedes usar Atrás.
+            Pulsa el botón de ubicaciones para elegir otra ubicación. Desplázate hacia abajo para ver la previsión diaria. También puedes usar Atrás.
           </p>
         </div>
       </section>
