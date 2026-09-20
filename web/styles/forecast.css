@@ -27,10 +27,6 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  .forecast-screen:focus-visible {
-    outline: var(--cielo-focus-outline);
-  }
-
   .forecast-header {
     position: sticky;
     z-index: 5;
@@ -110,8 +106,12 @@
   }
 
   .forecast-current-details {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     width: 100%;
     max-width: var(--cielo-content-width);
+    padding-top: 0.22rem;
     padding-inline: var(--forecast-data-inset);
     margin-inline: auto;
   }
@@ -154,15 +154,14 @@
   }
 
   .current-condition-description {
-    display: block;
-    /* Follow a two-digit reading until the desktop text cap takes over. */
-    max-width: min(18rem, 41.5vw, 100%);
-    margin: 0.4rem 0 0;
+    min-width: 0;
+    margin-left: auto;
     color: var(--cielo-color-muted);
     font-size: clamp(1.05rem, 4vw, 1.2rem);
     font-weight: 350;
     letter-spacing: 0.005em;
     line-height: 1.35;
+    text-align: right;
     overflow-wrap: anywhere;
   }
 
@@ -178,8 +177,8 @@
   .current-daily-extrema {
     --daily-extrema-gap: 0.9rem;
 
+    flex: 0 0 auto;
     justify-content: flex-start;
-    margin: 0.22rem 0 0;
     color: var(--cielo-color-text);
     font-size: clamp(1.25rem, 4.5vw, 1.45rem);
     font-weight: 500;
@@ -230,7 +229,7 @@
     width: calc(100% - 3.8rem);
     max-width: calc(var(--cielo-content-width) - 3.8rem);
     margin-inline: auto;
-    padding-top: 0.55rem;
+    padding-top: 1.35rem;
     padding-bottom: 0.4rem;
   }
 

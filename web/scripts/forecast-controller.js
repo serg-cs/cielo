@@ -118,7 +118,7 @@ export class ForecastController {
     this.#resetDocumentScroll();
     this.#installDocumentKeys();
 
-    this.#elements.screen.focus({ preventScroll: true });
+    this.#elements.screen.focus({ preventScroll: true, focusVisible: false });
   }
 
   dismiss() {
