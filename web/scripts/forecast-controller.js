@@ -518,7 +518,7 @@ export class ForecastController {
     if (!hourlyModes.includes(mode)) {
       return;
     }
-    const scrollAnchor = this.#firstVisibleHourlyForecastKey();
+    const scrollAnchor = this.#hourlyScrollAnchor();
     const modeChanged = mode !== this.#hourlyMode;
     this.#hourlyMode = mode;
     this.#closeHourlyModePicker({ restoreFocus: true });
@@ -655,6 +655,8 @@ export class ForecastController {
 
   #renderHourlyForecast() {
     const hasHourlyForecast = this.#hasHourlyForecast;
+    const shouldResetHourlyScroll = this.#resetHourlyScrollOnRender;
+    const previousScrollLeft = this.#elements.hourlyScroller.scrollLeft;
     this.#elements.hourlyForecastSection.hidden = !hasHourlyForecast;
     this.#elements.hourlyModePicker.hidden = !hasHourlyForecast;
     if (!hasHourlyForecast) {
@@ -663,12 +665,7 @@ export class ForecastController {
     const visiblePeriods = this.#hourlyMode === "weather"
       ? this.#hourlyForecastPeriods
       : this.#hourlyForecastPeriods.filter((period) => period.kind === "forecast");
-    this.#hourlyItems = visiblePeriods.map(
-      () => this.#createHourlyItem(),
-    );
-    this.#elements.hourlyList.replaceChildren(
-      ...this.#hourlyItems.map(({ element }) => element),
-    );
+    this.#syncHourlyItems(visiblePeriods.length);
 
     let forecastIndex = 0;
     for (
@@ -758,6 +755,7 @@ export class ForecastController {
         continue;
       }
 
+      delete element.dataset.forecastKey;
       hour.textContent = displaySolarTime(period.time);
       temperature.textContent = solarEventLabel(period.kind);
       precipitationProbability.textContent = "";
@@ -765,9 +763,34 @@ export class ForecastController {
       setDynamicIcon(icon, period.kind);
     }
 
-    if (hasHourlyForecast && this.#resetHourlyScrollOnRender) {
+    if (hasHourlyForecast && shouldResetHourlyScroll) {
       this.#resetHourlyScroll();
+    } else if (hasHourlyForecast) {
+      this.#elements.hourlyScroller.scrollLeft = previousScrollLeft;
     }
+  }
+
+  #syncHourlyItems(count) {
+    if (this.#hourlyItems.length === count) {
+      return;
+    }
+
+    if (this.#hourlyItems.length > count) {
+      for (const item of this.#hourlyItems.slice(count)) {
+        item.element.remove();
+      }
+      this.#hourlyItems = this.#hourlyItems.slice(0, count);
+      return;
+    }
+
+    const extra = Array.from(
+      { length: count - this.#hourlyItems.length },
+      () => this.#createHourlyItem(),
+    );
+    this.#hourlyItems = [...this.#hourlyItems, ...extra];
+    this.#elements.hourlyList.append(
+      ...extra.map(({ element }) => element),
+    );
   }
 
   #renderDailyForecast() {
@@ -849,39 +872,54 @@ export class ForecastController {
     });
   }
 
-  #firstVisibleHourlyForecastKey() {
+  #hourlyItemScrollOffset(element) {
+    const scroller = this.#elements.hourlyScroller;
+    return element.getBoundingClientRect().left -
+      scroller.getBoundingClientRect().left +
+      scroller.scrollLeft;
+  }
+
+  #hourlyScrollAnchor() {
     const scrollLeft = this.#elements.hourlyScroller.scrollLeft;
     const item = this.#hourlyItems.find(({ element }) =>
       element.dataset.forecastKey !== undefined &&
-      element.offsetLeft + element.offsetWidth > scrollLeft + 1
+      this.#hourlyItemScrollOffset(element) + element.offsetWidth > scrollLeft + 1
     );
     if (item !== undefined) {
-      return item.element.dataset.forecastKey ?? null;
+      return {
+        key: item.element.dataset.forecastKey ?? null,
+        offset: scrollLeft - this.#hourlyItemScrollOffset(item.element),
+      };
     }
-    for (let index = this.#hourlyItems.length - 1; index >= 0; index -= 1) {
-      const forecastKey = this.#hourlyItems[index]?.element.dataset.forecastKey;
-      if (forecastKey !== undefined) {
-        return forecastKey;
-      }
-    }
-    return null;
+    return { key: null, offset: scrollLeft };
   }
 
-  #restoreHourlyScroll(forecastKey) {
-    if (forecastKey === null) {
-      return;
-    }
+  #restoreHourlyScroll(anchor) {
+    const apply = () => {
+      if (this.#municipality === null) {
+        return;
+      }
+      if (anchor.key === null) {
+        this.#elements.hourlyScroller.scrollLeft = anchor.offset;
+        return;
+      }
+      const item = this.#hourlyItems.find(
+        ({ element }) => element.dataset.forecastKey === anchor.key,
+      );
+      if (item === undefined) {
+        return;
+      }
+      this.#elements.hourlyScroller.scrollLeft =
+        this.#hourlyItemScrollOffset(item.element) + anchor.offset;
+    };
+
     if (this.#hourlyScrollResetFrame !== null) {
       window.cancelAnimationFrame(this.#hourlyScrollResetFrame);
     }
+    apply();
     this.#hourlyScrollResetFrame = window.requestAnimationFrame(() => {
       this.#hourlyScrollResetFrame = null;
-      const item = this.#hourlyItems.find(
-        ({ element }) => element.dataset.forecastKey === forecastKey,
-      );
-      if (item !== undefined && this.#municipality !== null) {
-        this.#elements.hourlyScroller.scrollLeft = item.element.offsetLeft;
-      }
+      apply();
     });
   }
 

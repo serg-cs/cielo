@@ -229,7 +229,7 @@
     width: calc(100% - 3.8rem);
     max-width: calc(var(--cielo-content-width) - 3.8rem);
     margin-inline: auto;
-    padding-top: 1.35rem;
+    padding-top: 2.5rem;
     padding-bottom: 0.4rem;
   }
 
