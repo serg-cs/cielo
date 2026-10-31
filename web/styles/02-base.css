@@ -1,0 +1,475 @@
+/* Base elements, layout shell and shared components. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Follow iOS Dynamic Type on touch devices: the system body font sets the
+   root size, so every rem below grows with the user's text size setting.
+   Other browsers use their default size, which follows OS and browser text
+   settings (and the text-scale meta tag on Android). */
+@media (hover: none) {
+  @supports (font: -apple-system-body) {
+    html {
+      font: -apple-system-body;
+    }
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--color-background);
+}
+
+body {
+  margin: 0;
+  min-block-size: 100dvh;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  line-height: 1.45;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow-wrap: break-word;
+  /* Nothing may make the page scroll sideways; scrollers handle their own. */
+  overflow-x: clip;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+dl,
+dd,
+ul,
+ol {
+  margin: 0;
+}
+
+ul[role="list"],
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 0.18rem solid var(--color-focus);
+  outline-offset: 0.15rem;
+  border-radius: 0.25rem;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon-sprite {
+  display: none;
+}
+
+/* Icons */
+.icon {
+  inline-size: 1.25em;
+  block-size: 1.25em;
+  flex: none;
+  vertical-align: -0.2em;
+  stroke: currentColor;
+}
+
+/* Icons used as labels are one colour; weather icons keep their sun and rain colours. */
+.card-title,
+.tile-title,
+.fact-label,
+.beach-levels li,
+.sheet-pop,
+.warning-icon,
+.warning-banner-icon,
+.warning-badge {
+  --icon-sun: currentColor;
+  --icon-accent: currentColor;
+}
+
+.icon-small {
+  inline-size: 1em;
+  block-size: 1em;
+  vertical-align: -0.125em;
+}
+
+.icon-tiny {
+  inline-size: 0.875em;
+  block-size: 0.875em;
+  vertical-align: -0.1em;
+}
+
+.icon-condition {
+  inline-size: 1.75em;
+  block-size: 1.75em;
+}
+
+.icon-large {
+  inline-size: 2.25em;
+  block-size: 2.25em;
+}
+
+.icon-hero {
+  inline-size: 4.5em;
+  block-size: 4.5em;
+  stroke-width: 1.5;
+}
+
+/* Layout shell */
+.application {
+  container-type: inline-size;
+  inline-size: 100%;
+  max-inline-size: var(--content-width);
+  margin-inline: auto;
+  padding-inline: max(var(--space-4), env(safe-area-inset-left)) max(var(--space-4), env(safe-area-inset-right));
+  padding-block-end: max(var(--space-6), env(safe-area-inset-bottom));
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Buttons */
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: var(--touch-target);
+  min-block-size: var(--touch-target);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--color-surface-muted);
+}
+
+.icon-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.icon-button.destructive {
+  color: var(--color-destructive);
+}
+
+.text-button,
+.save-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-block-size: var(--touch-target);
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.text-button:hover,
+.save-button:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* Cards */
+.card {
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  min-inline-size: 0;
+}
+
+.card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.card-title {
+  overflow-wrap: break-word;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 1.0625rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.card-title > .icon {
+  color: var(--color-muted);
+}
+
+.card-title-detail {
+  color: var(--color-muted);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.card-empty,
+.notice {
+  color: var(--color-muted);
+}
+
+.notice {
+  padding: var(--space-3) var(--space-1);
+}
+
+.section-title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-inline: var(--space-1);
+}
+
+.rain-text {
+  color: var(--color-rain);
+}
+
+/* Footer with source and freshness */
+.source {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.offline-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Segmented toggle (radio buttons) */
+.segmented {
+  display: inline-flex;
+  padding: 0.1875rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+}
+
+.segment {
+  position: relative;
+  display: grid;
+}
+
+.segment input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segment > span {
+  display: grid;
+  place-items: center;
+  min-block-size: 2rem;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* With large text the toggle fills its own row and, if the words still do
+   not fit, wraps onto more rows. */
+@container (max-width: 24rem) {
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.5rem), 1fr));
+    inline-size: 100%;
+    border-radius: var(--radius-control);
+  }
+
+  .segment > span {
+    padding-inline: var(--space-2);
+  }
+}
+
+.segment input:checked + span {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 0.0625rem 0.1875rem rgb(0 0 0 / 14%);
+}
+
+.segment input:focus-visible + span {
+  outline: 0.18rem solid var(--color-focus);
+  outline-offset: 0.1rem;
+}
+
+/* Wind arrows point where the wind blows to. */
+.wind-arrow {
+  display: inline-grid;
+  place-items: center;
+  transform: rotate(var(--direction, 0deg));
+}
+
+.wind-level-1 {
+  --wind-color: var(--color-muted);
+}
+.wind-level-2 {
+  --wind-color: var(--color-wind);
+}
+.wind-level-3 {
+  --wind-color: var(--color-warm);
+}
+.wind-level-4,
+.wind-level-5 {
+  --wind-color: var(--color-destructive);
+}
+
+/* Links to other places */
+.link-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.link-list li + li .link-row {
+  border-block-start: 1px solid var(--color-border);
+}
+
+.link-row,
+.link-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-block-size: 3.5rem;
+  padding-block: var(--space-2);
+  text-decoration: none;
+}
+
+.link-card {
+  padding-inline: var(--space-4);
+  border-radius: var(--radius-card);
+}
+
+a.link-card:hover,
+.link-row:hover .link-name {
+  color: var(--color-accent);
+}
+
+/* The name keeps the room it needs; with large text the rest wraps below. */
+.link-text {
+  display: grid;
+  flex: 1 1 9rem;
+  min-inline-size: 0;
+}
+
+.link-side {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+.link-name {
+  font-weight: 700;
+}
+
+.link-detail {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.link-chevron {
+  color: var(--color-muted);
+}
+
+.place-kind,
+.result-kind.beach .icon {
+  color: var(--icon-sun);
+}
+
+.water-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-rain-soft);
+  color: var(--color-rain);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Warning colours shared by banners, badges and sheets */
+.level-yellow {
+  --level: var(--color-warning-yellow);
+  --on-level: var(--color-on-warning-yellow);
+}
+.level-orange {
+  --level: var(--color-warning-orange);
+  --on-level: var(--color-on-warning-orange);
+}
+.level-red {
+  --level: var(--color-warning-red);
+  --on-level: var(--color-on-warning-red);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .place-row,
+  .day-row,
+  .link-row,
+  .warning-banner,
+  .toast {
+    transition:
+      background-color 0.15s ease,
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+}

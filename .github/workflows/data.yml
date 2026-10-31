@@ -1,0 +1,61 @@
+name: Build and deploy data
+
+# Every hour at 17 minutes past. A failed run publishes nothing, so the data
+# online stays as it was until the next run succeeds.
+on:
+  schedule:
+    - cron: "17 * * * *"
+      timezone: Europe/Madrid
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      AEMET_API_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_ENDPOINT_URL:
+        required: true
+      DATA_BUCKET:
+        required: true
+
+permissions:
+  packages: read
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy data
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Build data
+        env:
+          AEMET_API_KEY: ${{ secrets.AEMET_API_KEY }}
+        run: cielo build data --output /tmp/cielo-data
+
+      # Only changed files are uploaded; --prune removes published files that
+      # are no longer built.
+      - name: Deploy data
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+          DATA_BUCKET: ${{ secrets.DATA_BUCKET }}
+        run: >-
+          cielo deploy data
+          --input /tmp/cielo-data
+          --bucket "$DATA_BUCKET"
+          --endpoint "$AWS_ENDPOINT_URL"
+          --region auto
+          --prune

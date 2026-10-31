@@ -5,6 +5,8 @@
 !Cargo.lock
 !askama.toml
 !build.rs
+!catalog/
+!catalog/**
 !src/
 !src/**
 !web/

@@ -1,28 +1,23 @@
+mod archive;
+mod beaches;
 mod client;
 mod decoding;
+mod fire;
+mod forecast;
 mod models;
-mod normalization;
+mod sources;
+mod tree;
+mod warnings;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use client::AemetClient;
-#[cfg(test)]
-pub(crate) use models::HourlyForecast;
+pub(crate) use fire::FireForecast;
 pub(crate) use models::{
-    AemetWeatherData, DailyForecast, DailySummary, MunicipalityDailyForecast, MunicipalityForecast,
-    PrecipitationAmount, PrecipitationProbability, WeatherCondition,
+    Accumulation, AemetProduct, BeachForecast, DailyForecast, DailyRange, EntryFailure, FireDanger,
+    HourValues, HourlyForecast, MunicipalityTimeZone, PeriodValues, WarningLevel, WeatherWarning,
 };
-pub(crate) use normalization::validate_municipality_id;
 
 #[cfg(test)]
-use anyhow::Result;
-#[cfg(test)]
-use client::{MAX_ATTEMPTS, RequestKind, RetryKind, parse_retry_after, redact_url, retry_delay};
-#[cfg(test)]
-use decoding::repair_iso_8859_15_mojibake;
-#[cfg(test)]
-use normalization::{
-    ForecastDocument, normalize_forecast, parse_daily_forecast_archive, parse_forecast_archive,
-    parse_municipalities,
-};
+pub(crate) use models::{DayForecast, ProbabilityWindow, SunTimes};

@@ -23,6 +23,32 @@ pub enum Command {
     Build(BuildArgs),
     /// Deploy the app or its weather data.
     Deploy(DeployArgs),
+    /// Maintain the catalog of places.
+    Catalog(CatalogArgs),
+}
+
+/// Catalog operations.
+#[derive(Debug, Args)]
+pub struct CatalogArgs {
+    /// Operation to perform.
+    #[command(subcommand)]
+    pub command: CatalogCommand,
+}
+
+/// Supported catalog operations.
+#[derive(Debug, Subcommand)]
+pub enum CatalogCommand {
+    /// Refresh the catalog files from AEMET (needs `AEMET_API_KEY`). Curated
+    /// municipality names are kept; new municipalities are listed for review.
+    Update(CatalogUpdateArgs),
+}
+
+/// Options for `catalog update`.
+#[derive(Debug, Args)]
+pub struct CatalogUpdateArgs {
+    /// Directory with the catalog files.
+    #[arg(long, value_name = "PATH", default_value = "catalog")]
+    pub directory: PathBuf,
 }
 
 /// Select what to build.
@@ -60,6 +86,10 @@ pub struct BuildDataArgs {
     /// Directory that will contain the generated weather data.
     #[arg(short, long, value_name = "PATH")]
     pub output: PathBuf,
+
+    /// Save the raw AEMET payloads in this directory, for test fixtures.
+    #[arg(long, value_name = "PATH", hide = true)]
+    pub dump_sources: Option<PathBuf>,
 }
 
 /// Select what to deploy.
@@ -110,4 +140,12 @@ pub struct DeployTargetArgs {
     /// Address buckets as endpoint paths instead of subdomains.
     #[arg(long)]
     pub path_style: bool,
+
+    /// Delete remote objects under this target's prefixes that are not in the input.
+    #[arg(long)]
+    pub prune: bool,
+
+    /// Show what would be uploaded or deleted without changing the bucket.
+    #[arg(long)]
+    pub dry_run: bool,
 }

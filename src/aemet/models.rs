@@ -1,153 +1,249 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
+use anyhow::{Context, Result};
+use jiff::{Timestamp, Zoned, civil::Date};
 use serde::{Serialize, Serializer};
 
-/// Complete source data needed to generate one weather-data output.
+/// AEMET product a failure or status refers to.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum AemetProduct {
+    Hourly,
+    Daily,
+    Warnings,
+    Fire,
+    Beaches,
+}
+
+impl AemetProduct {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hourly => "hourly",
+            Self::Daily => "daily",
+            Self::Warnings => "warnings",
+            Self::Fire => "fire",
+            Self::Beaches => "beaches",
+        }
+    }
+}
+
+/// One document that was skipped because it could not be used.
 #[derive(Debug)]
-pub(crate) struct AemetWeatherData {
-    pub(crate) municipalities: HashMap<String, String>,
-    pub(crate) forecasts: Vec<MunicipalityForecast>,
-    pub(crate) daily_forecasts: Vec<MunicipalityDailyForecast>,
-}
-
-/// Normalized hourly forecast for one municipality.
-#[derive(Clone, Debug)]
-pub(crate) struct MunicipalityForecast {
+pub(crate) struct EntryFailure {
     pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) province: String,
-    pub(crate) generated_at: String,
-    pub(crate) daily_forecasts: Vec<DailyForecast>,
+    pub(crate) product: AemetProduct,
+    pub(crate) error: anyhow::Error,
 }
 
-/// Normalized daily forecast for one municipality.
-#[derive(Clone, Debug)]
-pub(crate) struct MunicipalityDailyForecast {
-    pub(crate) id: String,
-    pub(crate) generated_at: String,
-    pub(crate) summaries: Vec<DailySummary>,
+/// Documents parsed from one archive, plus the ones that failed.
+#[derive(Debug)]
+pub(crate) struct ParsedArchive<T> {
+    pub(crate) items: Vec<T>,
+    pub(crate) failures: Vec<EntryFailure>,
+    pub(crate) entries: usize,
 }
 
-/// Daily aggregate values for one local forecast day.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct DailySummary {
-    pub(crate) date: String,
-    pub(crate) minimum_temperature_celsius: i16,
-    pub(crate) maximum_temperature_celsius: i16,
-
-    pub(crate) condition: Option<WeatherCondition>,
-    pub(crate) description: Option<String>,
-    pub(crate) precipitation_probability: Option<PrecipitationProbability>,
+/// Time zone of a municipality, decided by its province.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub(crate) enum MunicipalityTimeZone {
+    #[serde(rename = "Africa/Ceuta")]
+    AfricaCeuta,
+    #[serde(rename = "Atlantic/Canary")]
+    AtlanticCanary,
+    #[serde(rename = "Europe/Madrid")]
+    EuropeMadrid,
 }
 
-/// Solar times and hourly conditions for one local forecast day.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct DailyForecast {
-    pub(crate) date: String,
-    pub(crate) sunrise: String,
-    pub(crate) sunset: String,
-    pub(crate) hourly_forecasts: Vec<HourlyForecast>,
-    pub(crate) precipitation_probabilities: Vec<PrecipitationProbability>,
+impl MunicipalityTimeZone {
+    pub(crate) fn for_municipality(municipality_id: &str) -> Self {
+        match municipality_id.get(..2) {
+            Some("35" | "38") => Self::AtlanticCanary,
+            Some("51" | "52") => Self::AfricaCeuta,
+            _ => Self::EuropeMadrid,
+        }
+    }
+
+    pub(crate) const fn iana_name(self) -> &'static str {
+        match self {
+            Self::AfricaCeuta => "Africa/Ceuta",
+            Self::AtlanticCanary => "Atlantic/Canary",
+            Self::EuropeMadrid => "Europe/Madrid",
+        }
+    }
+
+    /// Rules for this zone from the time zone database bundled with jiff.
+    pub(crate) fn rules(self) -> Result<jiff::tz::TimeZone> {
+        jiff::tz::db()
+            .get(self.iana_name())
+            .with_context(|| format!("time zone {} is not available", self.iana_name()))
+    }
 }
 
-/// Conditions and temperature for one local forecast hour.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct HourlyForecast {
-    pub(crate) hour: u8,
-    pub(crate) temperature_celsius: i16,
-    pub(crate) condition: WeatherCondition,
-    pub(crate) description: String,
-    pub(crate) precipitation_amount: Option<PrecipitationAmount>,
-    pub(crate) wind_direction: Option<String>,
-    pub(crate) wind_speed_kilometres_per_hour: Option<u16>,
-    pub(crate) maximum_gust_kilometres_per_hour: Option<u16>,
-    pub(crate) relative_humidity_percent: Option<u8>,
-    pub(crate) apparent_temperature_celsius: Option<i16>,
-}
-
-/// Measurable or trace precipitation accumulated during one forecast hour.
+/// Precipitation or snow accumulated during one hour.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PrecipitationAmount {
-    MeasuredTenthsOfMillimetre(u16),
+pub(crate) enum Accumulation {
+    TenthsOfMillimetre(u32),
+    /// AEMET's `Ip`: inapreciable, less than 0.1 mm.
     Trace,
 }
 
-impl Serialize for PrecipitationAmount {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+impl Serialize for Accumulation {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::MeasuredTenthsOfMillimetre(tenths) if tenths % 10 == 0 => {
-                serializer.serialize_u16(tenths / 10)
+            Self::TenthsOfMillimetre(tenths) if tenths % 10 == 0 => {
+                serializer.serialize_u32(tenths / 10)
             }
-            Self::MeasuredTenthsOfMillimetre(tenths) => {
-                serializer.serialize_f64(f64::from(*tenths) / 10.0)
-            }
-            Self::Trace => serializer.serialize_str("trace"),
+            Self::TenthsOfMillimetre(tenths) => serializer.serialize_f64(f64::from(*tenths) / 10.0),
+            Self::Trace => serializer.serialize_str("Ip"),
         }
     }
 }
 
-/// Probability of precipitation during one normalized local-hour interval.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct PrecipitationProbability {
-    pub(crate) period: String,
-    pub(crate) percent: u8,
+/// Values forecast for one hour. Every field is optional.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct HourValues {
+    /// AEMET sky code such as `13` or `13n`.
+    pub(crate) sky: Option<String>,
+    pub(crate) temperature: Option<i16>,
+    pub(crate) feels_like: Option<i16>,
+    pub(crate) precipitation: Option<Accumulation>,
+    pub(crate) snow: Option<Accumulation>,
+    pub(crate) humidity: Option<u8>,
+    pub(crate) wind_direction: Option<String>,
+    pub(crate) wind_speed: Option<u16>,
+    pub(crate) gust: Option<u16>,
 }
 
-/// Supported visual condition derived from an AEMET condition code.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-pub(crate) enum WeatherCondition {
-    #[serde(rename = "cloud")]
-    Cloud,
-    #[serde(rename = "cloud-drizzle")]
-    CloudDrizzle,
-    #[serde(rename = "cloud-fog")]
-    CloudFog,
-    #[serde(rename = "cloud-lightning")]
-    CloudLightning,
-    #[serde(rename = "cloud-moon")]
-    CloudMoon,
-    #[serde(rename = "cloud-moon-rain")]
-    CloudMoonRain,
-    #[serde(rename = "cloud-rain")]
-    CloudRain,
-    #[serde(rename = "cloud-snow")]
-    CloudSnow,
-    #[serde(rename = "cloud-sun")]
-    CloudSun,
-    #[serde(rename = "cloud-sun-rain")]
-    CloudSunRain,
-    #[serde(rename = "cloudy")]
-    Cloudy,
-    #[serde(rename = "moon")]
-    Moon,
-    #[serde(rename = "snowflake")]
-    Snowflake,
-    #[serde(rename = "sun")]
-    Sun,
-}
-
-impl WeatherCondition {
-    pub(super) fn from_aemet_code(code: &str) -> Option<Self> {
-        match code {
-            "14" => Some(Self::Cloud),
-            "24" | "24n" | "25" | "26" => Some(Self::CloudDrizzle),
-            "81" | "81n" | "82" | "82n" | "83" | "83n" => Some(Self::CloudFog),
-            "51" | "51n" | "52" | "52n" | "53" | "53n" | "54" | "54n" | "61" | "61n" | "62"
-            | "62n" | "63" | "63n" | "64" | "64n" => Some(Self::CloudLightning),
-            "12n" | "13n" | "14n" | "17n" => Some(Self::CloudMoon),
-            "23n" | "25n" | "26n" | "43n" | "44n" => Some(Self::CloudMoonRain),
-            "44" | "45" | "45n" | "46" | "46n" => Some(Self::CloudRain),
-            "33" | "33n" | "34" | "34n" | "35" | "35n" | "36" | "36n" => Some(Self::CloudSnow),
-            "12" | "13" | "17" => Some(Self::CloudSun),
-            "23" | "43" => Some(Self::CloudSunRain),
-            "15" | "15n" | "16" | "16n" => Some(Self::Cloudy),
-            "11n" => Some(Self::Moon),
-            "71" | "71n" | "72" | "72n" | "73" | "73n" | "74" | "74n" => Some(Self::Snowflake),
-            "11" => Some(Self::Sun),
-            _ => None,
-        }
+impl HourValues {
+    pub(crate) fn is_empty(&self) -> bool {
+        self == &Self::default()
     }
+}
+
+/// Probabilities for a window of hours, such as AEMET's `0713`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ProbabilityWindow {
+    pub(crate) start: Zoned,
+    pub(crate) end: Zoned,
+    pub(crate) precipitation: Option<u8>,
+    pub(crate) storm: Option<u8>,
+    pub(crate) snow: Option<u8>,
+}
+
+/// Local sunrise and sunset, as `HH:MM`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SunTimes {
+    pub(crate) date: Date,
+    pub(crate) sunrise: Option<String>,
+    pub(crate) sunset: Option<String>,
+}
+
+/// Hourly forecast product for one municipality (about 48 hours).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HourlyForecast {
+    pub(crate) id: String,
+    pub(crate) issued: Option<Timestamp>,
+    pub(crate) hours: BTreeMap<Timestamp, HourValues>,
+    pub(crate) windows: Vec<ProbabilityWindow>,
+    pub(crate) sun: Vec<SunTimes>,
+}
+
+/// Values for one part of a day, such as `00-24`, `00-12` or `06-12`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PeriodValues {
+    pub(crate) sky: Option<String>,
+    pub(crate) precipitation_probability: Option<u8>,
+    pub(crate) snow_level_metres: Option<u16>,
+    pub(crate) wind_direction: Option<String>,
+    pub(crate) wind_speed: Option<u16>,
+    pub(crate) gust: Option<u16>,
+}
+
+impl PeriodValues {
+    pub(crate) fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+/// Minimum, maximum and values at fixed hours, such as temperature.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct DailyRange {
+    pub(crate) minimum: Option<i16>,
+    pub(crate) maximum: Option<i16>,
+    /// Values at local hours 6, 12, 18 and 24.
+    pub(crate) at_hours: BTreeMap<u8, i16>,
+}
+
+/// One day of the daily forecast product.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DayForecast {
+    pub(crate) date: Date,
+    pub(crate) temperature: DailyRange,
+    pub(crate) feels_like: DailyRange,
+    pub(crate) humidity: DailyRange,
+    pub(crate) uv_index: Option<u8>,
+    pub(crate) periods: BTreeMap<String, PeriodValues>,
+}
+
+/// Daily forecast product for one municipality (7 days).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DailyForecast {
+    pub(crate) id: String,
+    pub(crate) issued: Option<Timestamp>,
+    pub(crate) days: Vec<DayForecast>,
+}
+
+/// Warning level, from the Meteoalerta colour.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WarningLevel {
+    Yellow,
+    Orange,
+    Red,
+}
+
+/// An active weather warning for one or more zones.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WeatherWarning {
+    pub(crate) id: String,
+    pub(crate) level: WarningLevel,
+    /// Meteoalerta phenomenon code, such as `PR` or `TO`.
+    pub(crate) code: Option<String>,
+    /// Phenomenon in Spanish, such as `Lluvias`.
+    pub(crate) name: String,
+    pub(crate) onset: Option<Timestamp>,
+    pub(crate) expires: Option<Timestamp>,
+    pub(crate) description: Option<String>,
+    /// Threshold description, such as `Precipitación acumulada en una hora: 20 mm`.
+    pub(crate) parameter: Option<String>,
+    pub(crate) probability: Option<String>,
+    pub(crate) zones: Vec<String>,
+    pub(crate) area: Option<String>,
+    /// Polygons of the area as (latitude, longitude) points.
+    pub(crate) polygons: Vec<Vec<(f64, f64)>>,
+}
+
+/// Wildfire danger levels (1-6) for one municipality, by date.
+pub(crate) type FireDanger = BTreeMap<Date, u8>;
+
+/// One beach forecast day: morning and afternoon values.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BeachDay {
+    pub(crate) date: Date,
+    pub(crate) sky: [Option<u16>; 2],
+    pub(crate) wind: [Option<u16>; 2],
+    pub(crate) waves: [Option<u16>; 2],
+    pub(crate) maximum_temperature: Option<i16>,
+    pub(crate) water_temperature: Option<i16>,
+    pub(crate) feels_like: Option<u16>,
+    pub(crate) uv_index: Option<u8>,
+}
+
+/// Beach forecast.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BeachForecast {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) municipality_id: String,
+    pub(crate) issued: Option<Timestamp>,
+    pub(crate) days: Vec<BeachDay>,
 }

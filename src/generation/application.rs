@@ -18,56 +18,13 @@ use super::{
 
 const APPLICATION_NAME: &str = "Cielo";
 const APPLICATION_DESCRIPTION: &str = "Municipios con predicción meteorológica de AEMET";
-const APPLICATION_THEME_COLOR: &str = "#285b78";
+const THEME_COLOR: &str = "#221f22";
+const SERVICE_WORKER_SOURCE: &str = "sw.js";
+const SERVICE_WORKER_VERSION_PLACEHOLDER: &str = "__CIELO_VERSION__";
+const SERVICE_WORKER_PRECACHE_PLACEHOLDER: &str = "/* __CIELO_PRECACHE__ */ []";
 pub(super) const CONTENT_HASH_LENGTH: usize = 16;
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
-const STYLE_ASSETS: [(&str, &str); 5] = [
-    (
-        "styles/design-tokens.css",
-        "assets/styles/design-tokens.css",
-    ),
-    ("styles/foundation.css", "assets/styles/foundation.css"),
-    ("styles/locations.css", "assets/styles/locations.css"),
-    ("styles/forecast.css", "assets/styles/forecast.css"),
-    ("styles/interactions.css", "assets/styles/interactions.css"),
-];
-const SCRIPT_ASSETS: [(&str, &str); 10] = [
-    ("scripts/main.js", "assets/scripts/main.js"),
-    (
-        "scripts/application-controller.js",
-        "assets/scripts/application-controller.js",
-    ),
-    (
-        "scripts/locations-controller.js",
-        "assets/scripts/locations-controller.js",
-    ),
-    (
-        "scripts/forecast-controller.js",
-        "assets/scripts/forecast-controller.js",
-    ),
-    (
-        "scripts/municipality-row-gesture-controller.js",
-        "assets/scripts/municipality-row-gesture-controller.js",
-    ),
-    (
-        "scripts/municipality-catalog.js",
-        "assets/scripts/municipality-catalog.js",
-    ),
-    (
-        "scripts/weather-data-client.js",
-        "assets/scripts/weather-data-client.js",
-    ),
-    (
-        "scripts/forecast-store.js",
-        "assets/scripts/forecast-store.js",
-    ),
-    (
-        "scripts/preferences-store.js",
-        "assets/scripts/preferences-store.js",
-    ),
-    ("scripts/dom.js", "assets/scripts/dom.js"),
-];
 const APPLICATION_ICON_ASSETS: [(&str, &str); 4] = [
     (
         "application-icons/apple-touch-icon.png",
@@ -118,11 +75,7 @@ struct ApplicationDocumentTemplate<'a> {
     apple_touch_icon_url: &'a str,
     font_latin_url: &'a str,
     font_latin_ext_url: &'a str,
-    design_tokens_stylesheet_url: &'a str,
-    foundation_stylesheet_url: &'a str,
-    locations_stylesheet_url: &'a str,
-    forecast_stylesheet_url: &'a str,
-    interactions_stylesheet_url: &'a str,
+    stylesheet_urls: Vec<String>,
     main_script_url: &'a str,
     icon_license_url: &'a str,
     font_license_url: &'a str,
@@ -164,6 +117,7 @@ pub(crate) fn generate_application(
     weather_data_url: &str,
 ) -> Result<ApplicationGenerationSummary> {
     let weather_data_url = normalize_weather_data_url(weather_data_url)?;
+    warn_if_data_missing(output_directory, &weather_data_url);
     let (output_directory, staging) = create_staging_directory(output_directory, OutputKind::App)?;
 
     // Build the complete payload before publishing any application files.
@@ -182,9 +136,13 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let mut asset_paths = BTreeMap::new();
 
     // Hash independent static assets before generating files that reference them.
-    for (source, destination) in STYLE_ASSETS
+    let mut stylesheet_urls = Vec::new();
+    for (source, destination) in web_files("styles", "css") {
+        let output_path = insert_hashed_asset(&mut files, &destination, source_file(&source)?)?;
+        stylesheet_urls.push(browser_asset_url(&output_path));
+    }
+    for (source, destination) in APPLICATION_ICON_ASSETS
         .into_iter()
-        .chain(APPLICATION_ICON_ASSETS)
         .chain(FONT_ASSETS)
         .chain([
             ("favicon.svg", "favicon.svg"),
@@ -197,8 +155,9 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     }
 
     // Rewrite module references dependency-first so each name hashes its final bytes.
+    let mut script_paths = BTreeMap::new();
     for (logical_path, asset) in build_script_assets()? {
-        asset_paths.insert(logical_path, asset.output_path.clone());
+        script_paths.insert(logical_path, asset.output_path.clone());
         files.insert(asset.output_path, asset.bytes)?;
     }
 
@@ -213,8 +172,8 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
         scope: "./",
         display: "standalone",
         orientation: "any",
-        background_color: APPLICATION_THEME_COLOR,
-        theme_color: APPLICATION_THEME_COLOR,
+        background_color: THEME_COLOR,
+        theme_color: THEME_COLOR,
         icons: vec![
             ManifestIcon {
                 src: asset_url(&asset_paths, "assets/icons/application-192.png")?,
@@ -248,19 +207,18 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     let apple_touch_icon_url = asset_url(&asset_paths, "assets/icons/apple-touch-icon.png")?;
     let font_latin_url = asset_url(&asset_paths, "assets/fonts/manrope-latin-wght.woff2")?;
     let font_latin_ext_url = asset_url(&asset_paths, "assets/fonts/manrope-latin-ext-wght.woff2")?;
-    let design_tokens_stylesheet_url = asset_url(&asset_paths, "assets/styles/design-tokens.css")?;
-    let foundation_stylesheet_url = asset_url(&asset_paths, "assets/styles/foundation.css")?;
-    let locations_stylesheet_url = asset_url(&asset_paths, "assets/styles/locations.css")?;
-    let forecast_stylesheet_url = asset_url(&asset_paths, "assets/styles/forecast.css")?;
-    let interactions_stylesheet_url = asset_url(&asset_paths, "assets/styles/interactions.css")?;
-    let main_script_url = asset_url(&asset_paths, "assets/scripts/main.js")?;
+    let main_script_url = browser_asset_url(
+        script_paths
+            .get("assets/scripts/main.js")
+            .context("web source does not contain scripts/main.js")?,
+    );
     let icon_license_url = asset_url(&asset_paths, "assets/licenses/lucide.txt")?;
     let font_license_url = asset_url(&asset_paths, "assets/licenses/manrope.txt")?;
     let index = ApplicationDocumentTemplate {
         application_name: APPLICATION_NAME,
         description: APPLICATION_DESCRIPTION,
         generator_identity: GENERATOR_IDENTITY,
-        theme_color: APPLICATION_THEME_COLOR,
+        theme_color: THEME_COLOR,
         weather_data_url,
         icon_symbols: &icon_symbols,
         manifest_url: &manifest_url,
@@ -268,11 +226,7 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
         apple_touch_icon_url: &apple_touch_icon_url,
         font_latin_url: &font_latin_url,
         font_latin_ext_url: &font_latin_ext_url,
-        design_tokens_stylesheet_url: &design_tokens_stylesheet_url,
-        foundation_stylesheet_url: &foundation_stylesheet_url,
-        locations_stylesheet_url: &locations_stylesheet_url,
-        forecast_stylesheet_url: &forecast_stylesheet_url,
-        interactions_stylesheet_url: &interactions_stylesheet_url,
+        stylesheet_urls,
         main_script_url: &main_script_url,
         icon_license_url: &icon_license_url,
         font_license_url: &font_license_url,
@@ -280,7 +234,66 @@ fn build_application_files(weather_data_url: &str) -> Result<GeneratedFiles> {
     .render()
     .context("failed to render application document")?;
     files.insert("index.html", terminated_text(index))?;
+
+    // The service worker precaches the page and every hashed asset.
+    let service_worker = build_service_worker(&files)?;
+    files.insert(SERVICE_WORKER_SOURCE, service_worker)?;
     Ok(files)
+}
+
+/// Web source files in `directory` with `extension`, sorted, as
+/// `(source path, logical output path)`.
+fn web_files(directory: &str, extension: &str) -> Vec<(String, String)> {
+    let mut paths = WEB_SOURCE
+        .get_dir(directory)
+        .into_iter()
+        .flat_map(Dir::files)
+        .filter(|file| {
+            file.path()
+                .extension()
+                .is_some_and(|value| value == extension)
+        })
+        .filter_map(|file| file.path().to_str().map(normalized_logical_path))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|source| {
+            let destination = format!("assets/{source}");
+            (source, destination)
+        })
+        .collect()
+}
+
+/// Fill the service worker template with a version and its precache list.
+pub(super) fn build_service_worker(files: &GeneratedFiles) -> Result<Vec<u8>> {
+    let template = String::from_utf8(source_file(SERVICE_WORKER_SOURCE)?)
+        .context("service worker source is not valid UTF-8")?;
+    let mut precache = vec!["./".to_owned()];
+    let mut index = None;
+    for (path, bytes) in files.iter() {
+        let path = normalized_logical_path(&path.to_string_lossy());
+        if path == "index.html" {
+            index = Some(bytes);
+        } else if path != SERVICE_WORKER_SOURCE && !path.starts_with("assets/licenses/") {
+            precache.push(browser_asset_url(&path));
+        }
+    }
+    let precache_json =
+        serde_json::to_string(&precache).context("failed to encode service worker precache")?;
+    let index = index.context("index.html must be built before the service worker")?;
+    let mut version_input = precache_json.clone().into_bytes();
+    version_input.extend_from_slice(index);
+    let version = content_hash(&version_input);
+    if !template.contains(SERVICE_WORKER_VERSION_PLACEHOLDER)
+        || !template.contains(SERVICE_WORKER_PRECACHE_PLACEHOLDER)
+    {
+        bail!("service worker template is missing its placeholders");
+    }
+    Ok(template
+        .replace(SERVICE_WORKER_VERSION_PLACEHOLDER, &version)
+        .replace(SERVICE_WORKER_PRECACHE_PLACEHOLDER, &precache_json)
+        .into_bytes())
 }
 
 fn insert_hashed_asset(
@@ -336,11 +349,13 @@ pub(super) fn normalized_logical_path(path: &str) -> String {
 }
 
 fn build_script_assets() -> Result<BTreeMap<&'static str, HashedAsset>> {
-    let sources = SCRIPT_ASSETS
+    let sources = web_files("scripts", "js")
         .into_iter()
         .map(|(source_path, logical_path)| {
-            let source = String::from_utf8(source_file(source_path)?)
+            let source = String::from_utf8(source_file(&source_path)?)
                 .with_context(|| format!("script source is not valid UTF-8: {source_path}"))?;
+            // Logical paths live for the whole build; leak the few short strings.
+            let logical_path: &'static str = Box::leak(logical_path.into_boxed_str());
             Ok((logical_path, source))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
@@ -533,10 +548,25 @@ pub(super) fn build_icon_symbol(name: &str, source: &str) -> Result<String> {
 
     // Keep the glyph metadata while letting each rendered icon own its dimensions.
     let attributes = scalable_symbol_attributes(&source[root_start + "<svg".len()..root_open_end])?;
-    let body = &source[root_open_end + 1..root_close_start];
+    let body = themed_icon_colors(&source[root_open_end + 1..root_close_start]);
     Ok(format!(
         "<symbol id=\"cielo-icon-{name}\"{attributes}>{body}</symbol>"
     ))
+}
+
+/// Replace the icon set's fixed colours with theme variables: sun parts use
+/// `--icon-sun`, rain and moon parts `--icon-accent`, and anything else the
+/// surrounding text colour. Custom properties inherit into `<use>` copies.
+fn themed_icon_colors(body: &str) -> String {
+    body.replace(
+        "stroke=\"#ffd866\"",
+        "style=\"stroke: var(--icon-sun, currentColor)\"",
+    )
+    .replace(
+        "stroke=\"#78dce8\"",
+        "style=\"stroke: var(--icon-accent, currentColor)\"",
+    )
+    .replace("stroke=\"#fcfcfa\"", "stroke=\"currentColor\"")
 }
 
 fn scalable_symbol_attributes(attributes: &str) -> Result<String> {
@@ -581,9 +611,14 @@ fn scalable_symbol_attributes(attributes: &str) -> Result<String> {
         if name == "id" {
             bail!("icon SVG root must not define an ID");
         }
-        if matches!(name, "width" | "height") {
+        if matches!(name, "width" | "height" | "class") {
             continue;
         }
+        // Icons take the colour of the surrounding text in both themes.
+        let value = match name {
+            "stroke" | "fill" if value != "none" => "currentColor",
+            _ => value,
+        };
 
         normalized.push(' ');
         normalized.push_str(name);
@@ -601,6 +636,41 @@ fn source_file(path: &str) -> Result<Vec<u8>> {
         .get_file(path)
         .map(|file| file.contents().to_vec())
         .with_context(|| format!("required web source is missing: {path}"))
+}
+
+/// A relative data URL is resolved by the browser against the app's own
+/// page, not against the current directory. Warn when no data is found where
+/// the app will look, which usually means a folder path was passed instead
+/// (`dist/data` rather than `../data`).
+fn warn_if_data_missing(output_directory: &Path, weather_data_url: &str) {
+    if weather_data_url.starts_with("http://")
+        || weather_data_url.starts_with("https://")
+        || weather_data_url.starts_with('/')
+    {
+        return;
+    }
+    // Resolve `..` in the text: the output folder may not exist yet.
+    let mut places = output_directory.to_path_buf();
+    for part in weather_data_url
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+    {
+        if part == ".." {
+            if !places.pop() {
+                places.push("..");
+            }
+        } else {
+            places.push(part);
+        }
+    }
+    let places = places.join("v4/places.json");
+    if !places.is_file() {
+        tracing::warn!(
+            looked_for = %places.display(),
+            "no weather data where the app will look: --data is relative to the app's own folder, \
+             so with the app in dist/app and the data in dist/data pass --data ../data"
+        );
+    }
 }
 
 pub(super) fn normalize_weather_data_url(value: &str) -> Result<String> {

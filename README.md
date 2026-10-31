@@ -61,6 +61,16 @@ Then open [localhost:8000/app](http://localhost:8000/app/).
 When the data is hosted separately, pass its public HTTP or HTTPS URL to
 `--data` instead.
 
+## Catalog
+
+The places Cielo knows (provinces, municipalities and beaches) are kept in
+[`catalog/`](catalog/README.md) and built into the CLI. To refresh them from
+AEMET, keeping the curated municipality names:
+
+```sh
+cielo catalog update
+```
+
 ## Deploy
 
 Built directories can be uploaded directly to an S3-compatible bucket.
@@ -75,11 +85,14 @@ cielo deploy app --input dist/app --bucket cielo-app --region auto
 ```
 
 ```sh
-cielo deploy data --input dist/data --bucket cielo-data --region auto
+cielo deploy data --input dist/data --bucket cielo-data --region auto --prune
 ```
 
-Deployment replaces objects with matching names but does not remove other
-objects already stored in the bucket.
+Files already stored with identical content are skipped. With `--prune`, data
+files that are no longer published are removed; other objects in the bucket
+are left alone. Use `--dry-run` to see what would change.
 
 App assets are uploaded before the root `index.html`, preventing the website
 from being broken during deployment due to the use of hashed filenames.
+
+GitHub Actions builds and deploys the data every hour.

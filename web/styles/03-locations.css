@@ -1,0 +1,265 @@
+/* Saved places and search. */
+.locations-view {
+  max-inline-size: 40rem;
+  inline-size: 100%;
+  margin-inline: auto;
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: 3.5rem;
+  padding-block: max(var(--space-4), env(safe-area-inset-top)) 0;
+}
+
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.app-logo {
+  inline-size: 1.15em;
+  block-size: 1.15em;
+}
+
+.search {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  margin-inline: calc(var(--space-4) * -1);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-background);
+}
+
+.search-icon {
+  position: absolute;
+  inset-inline-start: calc(var(--space-4) * 2);
+  color: var(--color-muted);
+  pointer-events: none;
+}
+
+.search-input {
+  inline-size: 100%;
+  min-block-size: 3.25rem;
+  padding: var(--space-3) calc(var(--touch-target) + var(--space-2)) var(--space-3) calc(var(--space-4) + 2em);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: 1.0625rem;
+  appearance: none;
+}
+
+.search-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.search-input:placeholder-shown {
+  padding-inline-end: var(--space-4);
+}
+
+.search-input::placeholder {
+  color: var(--color-muted);
+}
+
+.search-input:focus-visible {
+  outline-offset: 0;
+  border-radius: var(--radius-pill);
+}
+
+.search-clear {
+  position: absolute;
+  inset-inline-end: calc(var(--space-4) + var(--space-1));
+  color: var(--color-muted);
+}
+
+.locations-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.place-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.place-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-block-size: 4.25rem;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+}
+
+a.place-row:hover {
+  background: color-mix(in srgb, var(--color-surface) 70%, var(--color-surface-muted));
+}
+
+.place-row.result {
+  min-block-size: 3.5rem;
+  padding-block: var(--space-2);
+}
+
+/* The name takes the line it needs; with large text the reading wraps below. */
+.place-text {
+  display: grid;
+  flex: 1 1 10rem;
+  min-inline-size: 0;
+}
+
+.place-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+.place-name {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+.place-kind {
+  margin-inline-end: 0.3em;
+}
+
+.place-where {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  overflow-wrap: break-word;
+}
+
+.place-reading {
+  display: grid;
+  justify-items: end;
+  min-inline-size: 3.5ch;
+}
+
+.place-temperature {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  font-size: 1.625rem;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result-kind {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.result-kind.beach {
+  background: color-mix(in srgb, var(--icon-sun) 16%, transparent);
+}
+
+.saved-mark {
+  color: var(--color-accent);
+}
+
+.warning-badge {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 1.75em;
+  block-size: 1.75em;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--level);
+  color: var(--on-level);
+}
+
+.place-row.editing {
+  min-block-size: 3.75rem;
+  padding-block: var(--space-1);
+  padding-inline-end: var(--space-2);
+}
+
+.edit-actions {
+  display: inline-flex;
+  margin-inline-start: auto;
+  flex-wrap: wrap;
+  justify-content: end;
+}
+
+/* First launch */
+.welcome {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4) var(--space-5);
+  text-align: center;
+}
+
+.welcome h2 {
+  font-size: 1.375rem;
+  font-weight: 800;
+}
+
+.welcome p {
+  max-inline-size: 26rem;
+  color: var(--color-muted);
+}
+
+.suggestions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chips li {
+  max-inline-size: 100%;
+}
+
+.chip {
+  display: inline-flex;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: var(--touch-target);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.chip .icon {
+  color: var(--color-accent);
+}
+
+.chip:hover {
+  background: var(--color-surface-muted);
+}

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="generator" content="{{ generator_identity }}">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="text-scale" content="scale">
+    <meta name="color-scheme" content="dark">
     <meta name="theme-color" content="{{ theme_color }}">
     <meta name="description" content="{{ description }}">
     <title>{{ application_name }}</title>
@@ -20,7 +22,7 @@
         src: url("{{ font_latin_ext_url }}") format("woff2");
         font-style: normal;
         font-weight: 200 800;
-        font-display: optional;
+        font-display: swap;
         unicode-range:
           U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
           U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF,
@@ -33,7 +35,7 @@
         src: url("{{ font_latin_url }}") format("woff2");
         font-style: normal;
         font-weight: 200 800;
-        font-display: optional;
+        font-display: swap;
         unicode-range:
           U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
           U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
@@ -44,30 +46,28 @@
     <link rel="manifest" href="{{ manifest_url }}">
     <link rel="icon" href="{{ favicon_url }}" type="image/svg+xml">
     <link rel="apple-touch-icon" href="{{ apple_touch_icon_url }}">
-    <link rel="stylesheet" href="{{ design_tokens_stylesheet_url }}">
-    <link rel="stylesheet" href="{{ foundation_stylesheet_url }}">
-    <link rel="stylesheet" href="{{ locations_stylesheet_url }}">
-    <link rel="stylesheet" href="{{ forecast_stylesheet_url }}">
-    <link rel="stylesheet" href="{{ interactions_stylesheet_url }}">
+{% for stylesheet in stylesheet_urls %}
+    <link rel="stylesheet" href="{{ stylesheet }}">
+{% endfor %}
     <script type="module" src="{{ main_script_url }}"></script>
   </head>
   <body>
     <main
       id="cielo-application"
-      class="cielo-application"
+      class="application"
       data-weather-data-url="{{ weather_data_url }}"
     >
-{% include "partials/locations-view.html" %}
-{% include "partials/forecast-view.html" %}
+      <section id="locations-view" class="view locations-view" aria-label="Mis lugares"></section>
+      <section id="forecast-view" class="view place-view" aria-labelledby="forecast-title" hidden></section>
+      <section id="beach-view" class="view place-view" aria-labelledby="beach-title" hidden></section>
+      <dialog id="sheet" class="sheet" aria-labelledby="sheet-title"></dialog>
+      <dialog id="guide" class="sheet guide-sheet" aria-labelledby="guide-title"></dialog>
     </main>
-{% include "partials/municipality-row.html" %}
-{% include "partials/hourly-forecast-period.html" %}
-{% include "partials/daily-forecast-period.html" %}
     <!-- Lucide icon license: {{ icon_license_url }} -->
     <!-- Manrope font license: {{ font_license_url }} -->
-    <svg class="cielo-icon-sprite" aria-hidden="true">
+    <svg class="icon-sprite" aria-hidden="true">
 {{ icon_symbols|safe }}
     </svg>
-    <noscript>Esta página necesita JavaScript para cargar los municipios.</noscript>
+    <noscript>Cielo necesita JavaScript para mostrar la previsión.</noscript>
   </body>
 </html>

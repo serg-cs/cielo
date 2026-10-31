@@ -8,8 +8,10 @@ use serde::Deserialize;
 use tempfile::{Builder, TempDir};
 use tracing::warn;
 
-use super::{GENERATOR_IDENTITY, files::GeneratedFiles};
+use super::{GENERATOR_IDENTITY, data::MARKER_FILE as DATA_MARKER, files::GeneratedFiles};
 
+/// Files replaced on every build; everything else is content-hashed.
+const APP_ENTRY_POINTS: [&str; 2] = ["sw.js", "index.html"];
 const APP_GENERATOR_DECLARATION: &str = r#"<meta name="generator" content="cielo">"#;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,7 +30,12 @@ impl OutputKind {
 }
 
 #[derive(Deserialize)]
-struct CatalogIdentity {
+struct DataIdentity {
+    generator: String,
+}
+
+#[derive(Deserialize)]
+struct LegacyCatalogIdentity {
     generator: String,
     provinces: Vec<serde_json::Value>,
 }
@@ -136,19 +143,23 @@ pub(super) fn publish_application_directory(
     }
 
     // Append new hashed files while preserving every prior version.
-    for (relative_path, bytes) in files
-        .iter()
-        .filter(|(relative_path, _)| *relative_path != Path::new("index.html"))
-    {
+    for (relative_path, bytes) in files.iter().filter(|(relative_path, _)| {
+        !APP_ENTRY_POINTS
+            .iter()
+            .any(|entry| *relative_path == Path::new(entry))
+    }) {
         append_application_file(staging.path(), output_directory, relative_path, bytes)?;
     }
 
-    // Atomically replace the entry point after all referenced assets are available.
-    fs::rename(
-        staging.path().join("index.html"),
-        output_directory.join("index.html"),
-    )
-    .context("failed to publish application index")
+    // Atomically replace the entry points after all referenced assets are
+    // available: the service worker first, then the page.
+    for entry in APP_ENTRY_POINTS {
+        if files.contains(entry) {
+            fs::rename(staging.path().join(entry), output_directory.join(entry))
+                .with_context(|| format!("failed to publish application {entry}"))?;
+        }
+    }
+    Ok(())
 }
 
 fn append_application_file(
@@ -281,10 +292,15 @@ fn is_generated_app(path: &Path) -> Result<bool> {
 }
 
 fn is_generated_data(path: &Path) -> Result<bool> {
+    if let Some(marker) = read_optional_file(&path.join(DATA_MARKER))? {
+        return Ok(serde_json::from_slice::<DataIdentity>(&marker)
+            .is_ok_and(|identity| identity.generator == GENERATOR_IDENTITY));
+    }
+    // Output written before schema v4.
     let Some(catalog) = read_optional_file(&path.join("catalog.json"))? else {
         return Ok(false);
     };
-    let Ok(identity) = serde_json::from_slice::<CatalogIdentity>(&catalog) else {
+    let Ok(identity) = serde_json::from_slice::<LegacyCatalogIdentity>(&catalog) else {
         return Ok(false);
     };
     Ok(identity.generator == GENERATOR_IDENTITY && !identity.provinces.is_empty())

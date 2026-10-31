@@ -1,6 +1,7 @@
 FROM rust:1.97.1-alpine3.24 AS builder
 WORKDIR /usr/src/cielo
 COPY Cargo.toml Cargo.lock askama.toml build.rs ./
+COPY catalog ./catalog
 COPY src ./src
 COPY web ./web
 RUN cargo build --locked --release

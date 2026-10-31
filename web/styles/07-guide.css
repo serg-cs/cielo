@@ -1,0 +1,301 @@
+/* The guide to every measurement, its ⓘ buttons and the list's button. */
+.guide-body {
+  gap: var(--space-4);
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-body {
+    scroll-behavior: auto;
+  }
+}
+
+.guide-index ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.guide-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: 2.25rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.guide-chip .icon {
+  color: var(--color-muted);
+}
+
+.guide-section {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  line-height: 1.45;
+  scroll-margin-block-start: var(--space-2);
+}
+
+.guide-section h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+/* Like everywhere else: white lines, the sun in its own colour. */
+.guide-section h3 .icon {
+  color: var(--color-text);
+}
+
+.guide-section.highlight {
+  animation: guide-highlight 1.6s ease-out;
+}
+
+@keyframes guide-highlight {
+  from {
+    box-shadow: inset 0 0 0 0.125rem var(--color-accent);
+  }
+  to {
+    box-shadow: inset 0 0 0 0.125rem transparent;
+  }
+}
+
+.guide-note {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.guide-scale {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.guide-scale li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 var(--space-2);
+}
+
+.guide-scale strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.guide-scale span:last-child {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+}
+
+/* With large text the meaning goes under the name. */
+@container (max-width: 24rem) {
+  .guide-scale li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .guide-scale span:last-child {
+    grid-column: 2;
+  }
+}
+
+.guide-mark {
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border-radius: var(--radius-pill);
+  background: var(--mark, var(--color-muted));
+}
+
+.guide-rain-1 {
+  --mark: color-mix(in srgb, var(--color-rain) 40%, transparent);
+}
+.guide-rain-2 {
+  --mark: color-mix(in srgb, var(--color-rain) 65%, transparent);
+}
+.guide-rain-3 {
+  --mark: var(--color-rain);
+}
+.guide-rain-4 {
+  --mark: var(--mono-purple);
+}
+.guide-wind-1 {
+  --mark: color-mix(in srgb, var(--color-muted) 50%, transparent);
+}
+.guide-wind-2 {
+  --mark: var(--color-muted);
+}
+.guide-wind-3 {
+  --mark: var(--color-wind);
+}
+.guide-wind-4 {
+  --mark: var(--color-warm);
+}
+.guide-wind-5 {
+  --mark: var(--color-destructive);
+}
+.guide-uv-1 {
+  --mark: var(--uv-1);
+}
+.guide-uv-2 {
+  --mark: var(--uv-2);
+}
+.guide-uv-3 {
+  --mark: var(--uv-3);
+}
+.guide-uv-4 {
+  --mark: var(--uv-4);
+}
+.guide-uv-5 {
+  --mark: var(--uv-5);
+}
+.guide-fire-1 {
+  --mark: var(--fire-1);
+}
+.guide-fire-2 {
+  --mark: var(--fire-2);
+}
+.guide-fire-3 {
+  --mark: var(--fire-3);
+}
+.guide-fire-4 {
+  --mark: var(--fire-4);
+}
+.guide-fire-5 {
+  --mark: var(--fire-5);
+}
+.guide-fire-6 {
+  --mark: var(--fire-6);
+}
+.guide-warning-1 {
+  --mark: var(--color-warning-yellow);
+}
+.guide-warning-2 {
+  --mark: var(--color-warning-orange);
+}
+.guide-warning-3 {
+  --mark: var(--color-warning-red);
+}
+.guide-level-1 {
+  --mark: var(--level-1);
+}
+.guide-level-2 {
+  --mark: var(--level-2);
+}
+.guide-level-3 {
+  --mark: var(--level-3);
+}
+
+.guide-gradient {
+  display: grid;
+  gap: var(--space-1);
+  margin-block: var(--space-1);
+}
+
+.guide-gradient-bar {
+  block-size: 0.5rem;
+  border-radius: var(--radius-pill);
+}
+
+.guide-gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ⓘ next to a title: a small icon with a full-size touch area. */
+.info-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.info-button::after {
+  content: "";
+  position: absolute;
+  inset: calc((1.5rem - var(--touch-target)) / 2);
+}
+
+.info-button:hover {
+  color: var(--color-accent);
+}
+
+/* The list's bottom bar: source and freshness on the left, quiet, and the
+   guide's button on the right. It stays on screen; the list fades out
+   under it. */
+.locations-bar {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  inline-size: min(100%, 40rem + 2 * var(--space-4));
+  margin-inline: auto;
+  padding: var(--space-6) max(var(--space-4), env(safe-area-inset-right))
+    max(var(--space-4), env(safe-area-inset-bottom)) max(var(--space-5), env(safe-area-inset-left));
+  background: linear-gradient(to bottom, transparent, var(--color-background) 45%);
+  pointer-events: none;
+}
+
+.locations-bar > * {
+  pointer-events: auto;
+}
+
+.locations-source {
+  min-inline-size: 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.locations-source a {
+  color: inherit;
+}
+
+.guide-button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 3rem;
+  block-size: 3rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-strong);
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 35%);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.guide-button:hover {
+  background: var(--color-surface-muted);
+}
+
+/* Room under the list so the bar never covers the last row. */
+.locations-view {
+  padding-block-end: 6rem;
+}

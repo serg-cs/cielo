@@ -1,0 +1,610 @@
+/* Detail sheets: bottom sheet on phones, centred dialog on wide screens. */
+.sheet {
+  inline-size: min(100%, 40rem);
+  max-inline-size: 100%;
+  max-block-size: 92dvh;
+  margin-block: auto 0;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-start-start-radius: var(--radius-card);
+  border-start-end-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.sheet[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet::backdrop {
+  background: rgb(10 12 16 / 50%);
+}
+
+@media (min-width: 48rem) {
+  .sheet {
+    margin-block: auto;
+    border-radius: var(--radius-card);
+    max-block-size: 85dvh;
+  }
+
+  .sheet-handle {
+    display: none;
+  }
+}
+
+.sheet-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3) var(--space-2) var(--space-5);
+}
+
+.sheet-handle {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-start: 50%;
+  inline-size: 2.5rem;
+  block-size: 0.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  transform: translateX(-50%);
+}
+
+.sheet-title {
+  flex: 1;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sheet-title:focus {
+  outline: none;
+}
+
+.sheet-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-5) max(var(--space-6), env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.sheet-condition {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.sheet-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  font-size: 1.375rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-pop {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-block-start: var(--space-1);
+  color: var(--color-rain);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sheet-section > h3 {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sheet-note {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+/* Day parts: one column per part */
+.parts {
+  display: grid;
+  grid-template-columns: repeat(var(--parts, 4), minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.part {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A part of today that is over: an outline, a clock and a short note. */
+.part.past {
+  border: 1px dashed var(--color-border);
+  background: none;
+  color: var(--color-muted);
+}
+
+.part.past .part-name {
+  color: var(--color-muted);
+}
+
+.part-past-icon {
+  display: grid;
+  place-items: center;
+  block-size: 2.5rem;
+  opacity: 0.7;
+}
+
+.part-past {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.part-name {
+  display: grid;
+  max-inline-size: 100%;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.part-name small {
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.part-temp {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+.part-pop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  color: var(--color-rain);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.part-wind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.part-wind .wind-arrow {
+  color: var(--wind-color, var(--color-muted));
+}
+
+.part-wind small,
+.part-gust {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+@container (max-width: 22rem) {
+  .parts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Hour-by-hour charts */
+.charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+}
+
+.chart {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.chart-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  font-weight: 800;
+}
+
+.chart-title .icon {
+  color: var(--color-muted);
+}
+
+/* The value labels sit in the space to the right of the plot; the space
+   above is where the pill appears. */
+.chart-area {
+  position: relative;
+  block-size: 7rem;
+  margin-block: var(--space-3) var(--space-2);
+  margin-inline-end: 3.75rem;
+  touch-action: pan-y;
+  cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chart-area:focus-visible {
+  outline-offset: 0.5rem;
+}
+
+.chart-plot {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+}
+
+.chart-grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Each data series sets its colour once; lines, bars, dots and keys use it. */
+.chart .temperature,
+.chart .feels {
+  --series: var(--color-temperature);
+}
+
+.chart .wind,
+.chart .gust {
+  --series: var(--color-wind);
+}
+
+.chart .rain,
+.chart .humidity,
+.chart .probability {
+  --series: var(--color-rain);
+}
+
+.chart .snow {
+  --series: var(--color-snow);
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--series);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Secondary series (feels-like, gusts, probability) are thinner and dashed. */
+.chart-line.feels,
+.chart-line.gust {
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  opacity: 0.75;
+}
+
+.chart-line.probability {
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+}
+
+.chart-bar {
+  fill: var(--series);
+  opacity: 0.85;
+}
+
+.chart-label {
+  position: absolute;
+  inset-inline-start: calc(100% + var(--space-2));
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chart-label.top {
+  inset-block-start: 0;
+  transform: translateY(-50%);
+}
+
+.chart-label.middle {
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+}
+
+.chart-label.bottom {
+  inset-block-end: 0;
+  transform: translateY(50%);
+}
+
+/* Selection: a line at the hour, dots on the lines and the pill above. */
+.chart-cursor {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: var(--x);
+  inline-size: 1px;
+  background: color-mix(in srgb, var(--color-text) 45%, transparent);
+  pointer-events: none;
+}
+
+.chart-dot {
+  position: absolute;
+  inset-inline-start: var(--x);
+  inset-block-start: var(--y);
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border: 0.125rem solid var(--color-surface);
+  border-radius: var(--radius-pill);
+  background: var(--series);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.chart-pill {
+  position: absolute;
+  inset-block-end: calc(100% + var(--space-2));
+  inset-inline-start: var(--left, 0);
+  z-index: 1;
+  display: grid;
+  padding: 0.375rem var(--space-3);
+  border-radius: 1rem;
+  background: var(--color-surface-strong);
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 35%);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-pill-time {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.chart-pill-readings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+}
+
+.chart-reading {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3125rem;
+}
+
+.chart-reading strong {
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+.chart-reading small {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* The mark sits on the text's middle line, like a key. */
+.chart-reading .chart-swatch,
+.chart-reading .wind-arrow {
+  align-self: center;
+}
+
+.chart-reading .wind-arrow {
+  color: var(--color-wind);
+}
+
+.chart-hours {
+  position: relative;
+  block-size: 1rem;
+  margin-inline-end: 3.75rem;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-hours span {
+  position: absolute;
+  inset-inline-start: var(--x);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.chart-hours span:first-child {
+  transform: none;
+}
+
+.chart-hours span:last-child {
+  transform: translateX(-100%);
+}
+
+.chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin-block-start: var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.chart-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chart-swatch {
+  inline-size: 1rem;
+  border-block-start: 0.1875rem solid var(--series);
+}
+
+.chart-swatch.feels,
+.chart-swatch.gust {
+  border-block-start: 0.125rem dashed var(--series);
+}
+
+.chart-swatch.probability {
+  border-block-start: 0.125rem dotted var(--series);
+}
+
+.chart-swatch.rain,
+.chart-swatch.snow {
+  inline-size: 0.5rem;
+  block-size: 0.75rem;
+  border: 0;
+  border-radius: 0.125rem;
+  background: var(--series);
+}
+
+/* Warnings: one card each, with a tinted header and aligned detail rows. */
+.warning-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.warning {
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--level) 45%, transparent);
+  background: var(--color-surface-muted);
+}
+
+.warning-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--level) 16%, var(--color-surface-muted));
+}
+
+.warning-icon {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--level);
+  color: var(--on-level);
+}
+
+.warning-heading {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+}
+
+.warning-heading h3 {
+  font-size: 1.125rem;
+  line-height: 1.25;
+}
+
+.warning-heading p {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.level-chip {
+  padding: 0.125rem var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--level);
+  color: var(--on-level);
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.warning-rows {
+  display: grid;
+  padding: var(--space-1) var(--space-4);
+}
+
+.warning-row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.warning-row + .warning-row {
+  border-block-start: 1px solid var(--color-border);
+}
+
+.warning-row dt {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.warning-row dd {
+  font-weight: 700;
+  overflow-wrap: break-word;
+}
+
+/* With large text the label goes above its value. */
+@container (max-width: 22rem) {
+  .warning-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.warning-description {
+  padding: 0 var(--space-4) var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+/* Warnings in the day view */
+.day-warnings {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sheet-note.with-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

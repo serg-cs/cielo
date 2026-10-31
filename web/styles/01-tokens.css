@@ -1,0 +1,77 @@
+/* Design tokens: a single dark theme based on Monokai Pro. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-background: #221f22;
+  --color-surface: #2d2a2e;
+  --color-surface-muted: #363337;
+  --color-surface-strong: #403e41;
+  --color-border: rgb(252 252 250 / 8%);
+
+  /* Text: every pair passes WCAG AA on every surface. */
+  --color-text: #fcfcfa;
+  --color-muted: #a9a7a9;
+  --color-accent: #78dce8;
+  --color-accent-soft: rgb(120 220 232 / 12%);
+  --color-accent-contrast: #221f22;
+  --color-focus: #ffd866;
+  --color-destructive: #ff6188;
+
+  /* Monokai Pro accent hues */
+  --mono-red: #ff6188;
+  --mono-orange: #fc9867;
+  --mono-yellow: #ffd866;
+  --mono-green: #a9dc76;
+  --mono-cyan: #78dce8;
+  --mono-purple: #ab9df2;
+
+  /* Data colours */
+  --color-temperature: var(--mono-orange);
+  --color-warm: var(--mono-orange);
+  --color-cold: var(--mono-cyan);
+  --color-rain: var(--mono-cyan);
+  --color-rain-soft: rgb(120 220 232 / 14%);
+  --color-snow: #c1c0c0;
+  --color-wind: var(--mono-green);
+  --icon-sun: #ffd866;
+  --icon-accent: #78dce8;
+
+  /* Meteoalerta levels: the Monokai yellow, orange and red */
+  --color-warning-yellow: #ffd866;
+  --color-warning-orange: #fc9867;
+  --color-warning-red: #ff6188;
+  --color-on-warning-yellow: #29242a;
+  --color-on-warning-orange: #29242a;
+  --color-on-warning-red: #29242a;
+
+  /* Scales */
+  --uv-1: #a9dc76;
+  --uv-2: #ffd866;
+  --uv-3: #fc9867;
+  --uv-4: #ff6188;
+  --uv-5: #ab9df2;
+  --fire-1: #78dce8;
+  --fire-2: #5fb8d8;
+  --fire-3: #a9dc76;
+  --fire-4: #ffd866;
+  --fire-5: #fc9867;
+  --fire-6: #ff6188;
+  --level-1: var(--mono-green);
+  --level-2: var(--mono-yellow);
+  --level-3: var(--mono-red);
+
+  /* Shape and spacing (rem, so they follow the text size) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --radius-card: 1.25rem;
+  --radius-control: 0.75rem;
+  --radius-pill: 999rem;
+  --touch-target: 2.75rem;
+  --content-width: 68rem;
+  --font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+}

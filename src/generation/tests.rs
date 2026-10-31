@@ -1,15 +1,15 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
 };
 
-use crate::aemet::{
-    AemetWeatherData, DailyForecast, DailySummary, HourlyForecast, MunicipalityDailyForecast,
-    MunicipalityForecast, PrecipitationAmount, PrecipitationProbability, WeatherCondition,
-};
 use html5ever::{parse_document, tendril::TendrilSink};
-use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+use lightningcss::{
+    declaration::DeclarationBlock,
+    rules::CssRule,
+    stylesheet::{ParserOptions, PrinterOptions, StyleSheet},
+};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use super::{
@@ -23,7 +23,6 @@ use super::{
         OutputKind, create_staging_directory, publish_application_directory,
         publish_staging_directory,
     },
-    weather_data::{WeatherDataStatistics, build_snapshot, write_weather_data_files},
 };
 
 #[test]
@@ -437,365 +436,279 @@ fn rejects_output_with_a_symbolic_link_identity_file() {
     assert!(error.to_string().contains("not recognized"));
 }
 
+fn build_app(root: &Path) -> (std::path::PathBuf, Vec<String>) {
+    let output = root.join("app");
+    generate_application(&output, "../data").expect("app should build");
+    let mut paths = Vec::new();
+    let mut directories = vec![output.clone()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory).expect("directory should be readable") {
+            let entry = entry.expect("entry");
+            if entry.file_type().expect("type").is_dir() {
+                directories.push(entry.path());
+            } else {
+                let relative = entry
+                    .path()
+                    .strip_prefix(&output)
+                    .expect("relative")
+                    .to_owned();
+                paths.push(normalized_logical_path(&relative.to_string_lossy()));
+            }
+        }
+    }
+    paths.sort();
+    (output, paths)
+}
+
+#[derive(Default)]
+struct DocumentFacts {
+    ids: BTreeSet<String>,
+    meta: BTreeMap<String, Vec<String>>,
+    stylesheets: Vec<String>,
+    scripts: Vec<String>,
+    data_url: Option<String>,
+}
+
+fn collect(handle: &Handle, facts: &mut DocumentFacts) {
+    if let NodeData::Element { name, attrs, .. } = &handle.data {
+        let attrs = attrs.borrow();
+        let value = |key: &str| {
+            attrs
+                .iter()
+                .find(|attribute| attribute.name.local.as_ref() == key)
+                .map(|attribute| attribute.value.to_string())
+        };
+        if let Some(id) = value("id") {
+            assert!(facts.ids.insert(id.clone()), "duplicate ID {id}");
+        }
+        match name.local.as_ref() {
+            "meta" => {
+                if let (Some(name), Some(content)) = (value("name"), value("content")) {
+                    facts.meta.entry(name).or_default().push(content);
+                }
+            }
+            "link" if value("rel").as_deref() == Some("stylesheet") => {
+                facts
+                    .stylesheets
+                    .push(value("href").expect("stylesheet href"));
+            }
+            "script" => facts.scripts.extend(value("src")),
+            "main" => facts.data_url = value("data-weather-data-url"),
+            _ => {}
+        }
+    }
+    for child in handle.children.borrow().iter() {
+        collect(child, facts);
+    }
+}
+
 #[test]
-fn generates_exact_readable_app_output() {
-    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let output_directory = temporary_root.path().join("application");
-
-    let summary = generate_application(&output_directory, "../weather-data")
-        .expect("application should generate");
-
-    let paths = output_paths(&output_directory);
-    assert_eq!(paths.len(), summary.files);
-    assert!(paths.contains(&"index.html".to_owned()));
-    for (directory, stem, extension) in [
-        ("", "manifest", "webmanifest"),
-        ("", "favicon", "svg"),
-        ("assets/licenses", "lucide", "txt"),
-        ("assets/styles", "design-tokens", "css"),
-        ("assets/styles", "foundation", "css"),
-        ("assets/styles", "locations", "css"),
-        ("assets/styles", "forecast", "css"),
-        ("assets/styles", "interactions", "css"),
-        ("assets/scripts", "main", "js"),
-        ("assets/scripts", "application-controller", "js"),
-        ("assets/scripts", "locations-controller", "js"),
-        ("assets/scripts", "forecast-controller", "js"),
-        (
-            "assets/scripts",
-            "municipality-row-gesture-controller",
-            "js",
-        ),
-        ("assets/scripts", "municipality-catalog", "js"),
-        ("assets/scripts", "weather-data-client", "js"),
-        ("assets/scripts", "forecast-store", "js"),
-        ("assets/scripts", "preferences-store", "js"),
-        ("assets/scripts", "dom", "js"),
-        ("assets/icons", "apple-touch-icon", "png"),
-        ("assets/icons", "application-192", "png"),
-        ("assets/icons", "application-512", "png"),
-        ("assets/icons", "application-maskable-512", "png"),
-        ("assets/fonts", "manrope-latin-wght", "woff2"),
-        ("assets/fonts", "manrope-latin-ext-wght", "woff2"),
-        ("assets/licenses", "manrope", "txt"),
+fn weather_icons_keep_their_colours() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let (output, _) = build_app(root.path());
+    let index = fs::read_to_string(output.join("index.html")).expect("index");
+    // Weather icons keep their sun and rain colours through the theme
+    // variables, on the shapes themselves (colours on the root are dropped).
+    for (icon, variable) in [
+        ("sun", "--icon-sun"),
+        ("cloud-sun", "--icon-sun"),
+        ("haze", "--icon-sun"),
+        ("cloud-lightning", "--icon-sun"),
+        ("cloud-rain", "--icon-accent"),
+        ("cloud-drizzle", "--icon-accent"),
     ] {
-        find_hashed_path(&paths, directory, stem, extension);
+        let start = index
+            .find(&format!("id=\"cielo-icon-{icon}\""))
+            .unwrap_or_else(|| panic!("sprite should contain {icon}"));
+        let symbol = &index[start..start + index[start..].find("</symbol>").expect("symbol end")];
+        assert!(symbol.contains(variable), "{icon} should use {variable}");
     }
-    for path in paths.iter().filter(|path| path.as_str() != "index.html") {
-        assert_content_hash(&output_directory, path);
-    }
-    assert!(!paths.contains(&"service-worker.js".to_owned()));
-    assert!(paths.iter().all(|path| !path.starts_with('.')));
-    assert!(paths.iter().all(|path| !path.contains(".DS_Store")));
-    assert!(
-        paths
-            .iter()
-            .all(|path| !has_extension(path, "svg") || path.starts_with("favicon."))
-    );
-    let index =
-        fs::read_to_string(output_directory.join("index.html")).expect("index should be readable");
-    let dom = parse_document(RcDom::default(), html5ever::ParseOpts::default()).one(index.clone());
-    assert!(
-        dom.errors.borrow().is_empty(),
-        "generated HTML contains parse errors"
-    );
-    assert_generated_document_invariants(&dom);
-    assert_generated_index_content(&index);
-    assert_generated_fonts(&output_directory, &paths, &index);
+}
 
-    for path in paths.iter().filter(|path| has_extension(path, "css")) {
-        assert!(index.contains(&format!("./{path}")));
-        let css =
-            fs::read_to_string(output_directory.join(path)).expect("stylesheet should be readable");
-        StyleSheet::parse(&css, ParserOptions::default())
-            .unwrap_or_else(|error| panic!("invalid CSS in {path}: {error:?}"));
+#[test]
+fn generates_a_complete_app_shell() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let (output, paths) = build_app(root.path());
+    let index = fs::read_to_string(output.join("index.html")).expect("index");
+    let dom = parse_document(RcDom::default(), html5ever::ParseOpts::default()).one(index.as_str());
+    let mut facts = DocumentFacts::default();
+    collect(&dom.document, &mut facts);
+
+    for id in [
+        "cielo-application",
+        "locations-view",
+        "forecast-view",
+        "beach-view",
+        "sheet",
+    ] {
+        assert!(facts.ids.contains(id), "index should contain #{id}");
+    }
+    assert!(facts.ids.contains("cielo-icon-sun"));
+    assert!(facts.ids.contains("cielo-icon-triangle-alert"));
+    assert_eq!(facts.meta["text-scale"], ["scale"]);
+    assert_eq!(facts.meta["theme-color"], ["#221f22"]);
+    assert_eq!(facts.meta["generator"], ["cielo"]);
+    assert_eq!(facts.data_url.as_deref(), Some("../data/"));
+    assert!(
+        !index.contains("stroke=\"#"),
+        "icons must follow the text colour"
+    );
+
+    // Stylesheets keep their numbered order and every referenced file exists.
+    let names = facts
+        .stylesheets
+        .iter()
+        .map(|href| {
+            href.rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+    assert!(names.len() >= 5);
+    for href in facts.stylesheets.iter().chain(&facts.scripts) {
+        assert!(
+            output.join(href.trim_start_matches("./")).is_file(),
+            "{href} should exist"
+        );
     }
 
-    for path in paths.iter().filter(|path| has_extension(path, "js")) {
-        let script =
-            fs::read_to_string(output_directory.join(path)).expect("script should be readable");
-        for specifier in local_javascript_specifiers(&script) {
-            let referenced_path = Path::new(path)
-                .parent()
-                .expect("script should have a parent")
-                .join(
-                    specifier
-                        .strip_prefix("./")
-                        .expect("local specifier should be relative"),
-                )
-                .to_string_lossy()
-                .replace('\\', "/");
+    // Every hashed file is named after its content.
+    for path in &paths {
+        let file_name = path.rsplit('/').next().unwrap_or_default();
+        let parts = file_name.split('.').collect::<Vec<_>>();
+        if parts.len() == 3 && parts[1].len() == CONTENT_HASH_LENGTH {
+            let bytes = fs::read(output.join(path)).expect("asset");
+            assert_eq!(parts[1], content_hash(&bytes), "{path} hash");
+        }
+    }
+
+    // The service worker precaches exactly the shell and hashed assets.
+    let worker = fs::read_to_string(output.join("sw.js")).expect("service worker");
+    assert!(!worker.contains("__CIELO_"), "placeholders are replaced");
+    let start = worker.find("const PRECACHE = ").expect("precache") + "const PRECACHE = ".len();
+    let end = start + worker[start..].find(";\n").expect("end of precache");
+    let precache = serde_json::from_str::<Vec<String>>(&worker[start..end]).expect("precache JSON");
+    assert_eq!(precache[0], "./");
+    for entry in &precache[1..] {
+        assert!(
+            output.join(entry.trim_start_matches("./")).is_file(),
+            "{entry} should exist"
+        );
+    }
+    let expected = paths
+        .iter()
+        .filter(|path| {
+            !matches!(path.as_str(), "index.html" | "sw.js")
+                && !path.starts_with("assets/licenses/")
+        })
+        .count();
+    assert_eq!(precache.len() - 1, expected);
+
+    // Module imports point at files that exist next to the importer.
+    for path in paths
+        .iter()
+        .filter(|path| has_extension(path, "js") && path.starts_with("assets/scripts/"))
+    {
+        let source = fs::read_to_string(output.join(path)).expect("script");
+        for line in source.lines().filter(|line| line.contains(" from \"./")) {
+            let specifier = line
+                .split("from \"./")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .expect("specifier");
             assert!(
-                paths.contains(&referenced_path),
-                "{path} references missing {referenced_path}"
+                output.join("assets/scripts").join(specifier).is_file(),
+                "{path} imports missing {specifier}"
             );
         }
-        assert!(!script.contains("innerHTML"));
-        assert!(!script.contains("<style>"));
-        assert!(!script.contains("customElements"));
     }
-
-    assert_application_manifest(&output_directory, &paths, &index);
-}
-
-fn assert_generated_index_content(index: &str) {
-    assert!(index.contains("<template id=\"municipality-row-template\">"));
-    assert!(index.contains("<template id=\"daily-forecast-period-template\">"));
-    assert!(index.contains(r#"<meta name="generator" content="cielo">"#));
-    assert!(index.contains("id=\"cielo-application\""));
-    assert!(index.contains("data-weather-data-url=\"../weather-data/\""));
-    assert!(index.contains("<symbol id=\"cielo-icon-sun\""));
-    assert!(index.contains("<symbol id=\"cielo-icon-umbrella\""));
-    assert!(index.contains("<h1 id=\"municipality-title\""));
-    assert!(!index.contains("municipality-switcher"));
-    assert!(!index.contains("back-swipe-region"));
 }
 
 #[test]
-fn app_generation_is_deterministic() {
-    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let first_directory = temporary_root.path().join("first");
-    let second_directory = temporary_root.path().join("second");
-
-    generate_application(&first_directory, "../weather-data").expect("first app should generate");
-    generate_application(&second_directory, "../weather-data").expect("second app should generate");
-
-    assert_eq!(
-        output_paths(&first_directory),
-        output_paths(&second_directory)
-    );
-    for path in output_paths(&first_directory) {
-        assert_eq!(
-            fs::read(first_directory.join(&path)).expect("first file should read"),
-            fs::read(second_directory.join(&path)).expect("second file should read"),
-            "different generated bytes for {path}"
+fn stylesheets_parse_and_scale_with_text_size() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let (output, paths) = build_app(root.path());
+    for path in paths.iter().filter(|path| has_extension(path, "css")) {
+        let source = fs::read_to_string(output.join(path)).expect("stylesheet");
+        let sheet = StyleSheet::parse(&source, ParserOptions::default())
+            .unwrap_or_else(|error| panic!("{path} should parse: {error}"));
+        let mut problems = Vec::new();
+        check_rules(&sheet.rules.0, &mut problems);
+        assert!(
+            problems.is_empty(),
+            "{path}: sizes must scale with text, found {problems:?}"
+        );
+        assert!(
+            !source.contains("html {\n  font-size")
+                && !source.contains("font: -apple-system-body;\n      font-size"),
+            "{path} must not fix the root font size"
         );
     }
 }
 
-#[test]
-fn builds_weather_snapshot() {
-    let snapshot = build_snapshot(sample_source_data()).expect("snapshot should build");
-
-    assert_eq!(snapshot.municipalities.len(), 1);
-    assert_eq!(snapshot.municipalities[0].id, "35001");
-    assert_eq!(snapshot.municipalities[0].name, "Agaete");
-    assert_eq!(snapshot.municipalities[0].province, "Las Palmas");
-    assert_eq!(snapshot.forecasts[0].days.len(), 1);
-
-    let hourly = snapshot.forecasts[0].days[0]
-        .hourly
-        .as_ref()
-        .expect("matching hourly day should be retained");
-    assert_eq!(hourly.hourly_forecasts[0].temperature_celsius, 24);
-    assert_eq!(
-        hourly.hourly_forecasts[0].condition,
-        WeatherCondition::CloudSun
-    );
-    assert_eq!(
-        snapshot.forecasts[0].days[0]
-            .summary
-            .minimum_temperature_celsius,
-        18
-    );
-    assert_eq!(
-        snapshot.forecasts[0].days[0].summary.condition,
-        Some(WeatherCondition::CloudSun)
-    );
+/// Collect declarations that size text or boxes in pixels.
+fn check_rules(rules: &[CssRule], problems: &mut Vec<String>) {
+    for rule in rules {
+        match rule {
+            CssRule::Style(style) => {
+                check_declarations(&style.declarations, problems);
+                check_rules(&style.rules.0, problems);
+            }
+            CssRule::Media(media) => check_rules(&media.rules.0, problems),
+            CssRule::Supports(supports) => check_rules(&supports.rules.0, problems),
+            CssRule::Container(container) => check_rules(&container.rules.0, problems),
+            _ => {}
+        }
+    }
 }
 
-#[test]
-fn publishes_established_spanish_location_names() {
-    let source_data = AemetWeatherData {
-        municipalities: HashMap::from([("25120".to_owned(), "Lleida".to_owned())]),
-        forecasts: vec![MunicipalityForecast {
-            province: "Lleida".to_owned(),
-            ..sample_forecast("25120")
-        }],
-        daily_forecasts: vec![sample_daily_forecast("25120")],
-    };
-
-    let snapshot = build_snapshot(source_data).expect("snapshot should build");
-
-    assert_eq!(snapshot.municipalities[0].name, "Lérida");
-    assert_eq!(snapshot.municipalities[0].province, "Lérida");
-}
-
-#[test]
-fn writes_readable_weather_data_files() {
-    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let snapshot = build_snapshot(sample_source_data()).expect("snapshot should build");
-    let mut statistics = WeatherDataStatistics::default();
-
-    let bundle_files = write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
-        .expect("weather-data files should write");
-
-    assert_eq!(
-        output_paths(temporary_root.path()),
-        ["catalog.json", "forecasts/35/000.json"]
-    );
-    assert_eq!(bundle_files, 1);
-    let catalog: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("catalog.json")).expect("catalog should be readable"),
-    )
-    .expect("catalog should decode");
-    let bundle: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
-            .expect("forecast bundle should be readable"),
-    )
-    .expect("forecast bundle should decode");
-    let forecast = &bundle["forecasts"]["35001"];
-
-    assert_eq!(bundle["schema_version"], 2);
-    assert_eq!(catalog["generator"], "cielo");
-    assert_eq!(catalog["updated_at"], "2026-07-25T08:00:00");
-    assert_eq!(catalog["provinces"][0]["name"], "Las Palmas");
-    assert_eq!(catalog["provinces"][0]["tz"], "Atlantic/Canary");
-    assert_eq!(catalog["provinces"][0]["municipalities"][0]["id"], "35001");
-    assert_eq!(forecast[0]["date"], "2026-07-25");
-    assert_eq!(forecast[0]["summary"]["temp_min_c"], 18);
-    assert_eq!(forecast[0]["summary"]["temp_max_c"], 26);
-    assert_eq!(forecast[0]["summary"]["state"], "cloud-sun");
-    assert_eq!(forecast[0]["summary"]["desc"], "Intervalos nubosos");
-    assert_eq!(forecast[0]["summary"]["precip_prob"]["period"], "00-24");
-    assert_eq!(forecast[0]["summary"]["precip_prob"]["pct"], 45);
-    assert_eq!(forecast[0]["events"][0]["kind"], "sunrise");
-    assert_eq!(forecast[0]["events"][0]["time"], "07:10");
-    assert_eq!(forecast[0]["events"][1]["kind"], "sunset");
-    assert_eq!(forecast[0]["events"][1]["time"], "20:55");
-    assert_eq!(forecast[0]["precip_probs"][0]["period"], "08-14");
-    assert_eq!(forecast[0]["precip_probs"][0]["pct"], 60);
-    assert_eq!(forecast[0]["hours"][0]["temp_c"], 24);
-    assert_eq!(forecast[0]["hours"][0]["state"], "cloud-sun");
-    assert_eq!(forecast[0]["hours"][0]["desc"], "Intervalos nubosos");
-    assert_eq!(forecast[0]["hours"][0]["precip_mm"], "trace");
-    assert_eq!(forecast[0]["hours"][0]["wind_dir"], "NE");
-    assert_eq!(forecast[0]["hours"][0]["wind_kmh"], 18);
-    assert_eq!(forecast[0]["hours"][0]["gust_kmh"], 32);
-    assert_eq!(forecast[0]["hours"][0]["humidity_pct"], 64);
-    assert_eq!(forecast[0]["hours"][0]["feels_like_c"], 26);
-
-    // Generated JSON has no formatting-only whitespace.
-    for path in [
-        temporary_root.path().join("catalog.json"),
-        temporary_root.path().join("forecasts/35/000.json"),
-    ] {
-        let bytes = fs::read(path).expect("weather-data file should be readable");
-        assert_eq!(bytes.last(), Some(&b'}'));
-        assert!(!bytes.contains(&b'\n'));
-        assert!(!bytes.contains(&b'\t'));
+fn check_declarations(declarations: &DeclarationBlock, problems: &mut Vec<String>) {
+    for (property, _important) in declarations.iter() {
+        let name = property.property_id().name().to_owned();
+        let watched = matches!(
+            name.as_str(),
+            "font-size"
+                | "line-height"
+                | "height"
+                | "block-size"
+                | "min-height"
+                | "min-block-size"
+                | "width"
+                | "min-width"
+        );
+        if !watched {
+            continue;
+        }
+        let value = property
+            .value_to_css_string(PrinterOptions::default())
+            .unwrap_or_default();
+        // One-pixel helpers (visually hidden text) are allowed.
+        if value.contains("px") && value != "1px" {
+            problems.push(format!("{name}: {value}"));
+        }
     }
 }
 
 #[test]
-fn writes_the_full_daily_horizon_without_inventing_hourly_data() {
-    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let mut source_data = sample_source_data();
-    source_data.daily_forecasts[0].summaries.push(DailySummary {
-        date: "2026-07-26".to_owned(),
-        minimum_temperature_celsius: 17,
-        maximum_temperature_celsius: 25,
-        condition: None,
-        description: None,
-        precipitation_probability: None,
-    });
-    let snapshot = build_snapshot(source_data).expect("snapshot should build");
-    let mut statistics = WeatherDataStatistics::default();
-
-    write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
-        .expect("weather-data files should write");
-
-    let bundle: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
-            .expect("forecast bundle should be readable"),
-    )
-    .expect("forecast bundle should decode");
-    let later_day = &bundle["forecasts"]["35001"][1];
-    assert_eq!(later_day["date"], "2026-07-26");
-    assert_eq!(later_day["summary"]["temp_min_c"], 17);
-    assert_eq!(later_day["summary"]["temp_max_c"], 25);
-    assert_eq!(later_day["summary"]["state"], serde_json::Value::Null);
-    assert_eq!(later_day["summary"]["desc"], serde_json::Value::Null);
-    assert_eq!(later_day["summary"]["precip_prob"], serde_json::Value::Null);
-    assert_eq!(later_day["events"], serde_json::json!([]));
-    assert_eq!(later_day["precip_probs"], serde_json::json!([]));
-    assert_eq!(later_day["hours"], serde_json::json!([]));
-}
-
-#[test]
-fn drops_a_municipality_when_an_hourly_day_has_no_daily_summary() {
-    let mut source_data = sample_source_data();
-    source_data
-        .municipalities
-        .insert("35002".to_owned(), "Missing summary".to_owned());
-    let mut incomplete_forecast = sample_forecast("35002");
-    incomplete_forecast.daily_forecasts[0].date = "2026-07-26".to_owned();
-    source_data.forecasts.push(incomplete_forecast);
-    source_data
-        .daily_forecasts
-        .push(sample_daily_forecast("35002"));
-
-    let snapshot = build_snapshot(source_data).expect("valid municipalities should be retained");
-
-    assert_eq!(snapshot.municipalities.len(), 1);
-    assert_eq!(snapshot.municipalities[0].id, "35001");
-    assert_eq!(snapshot.forecasts.len(), 1);
-    assert_eq!(snapshot.forecasts[0].id, "35001");
-}
-
-#[test]
-fn groups_forecasts_into_stable_twenty_id_ranges() {
-    let temporary_root = tempfile::tempdir().expect("temporary root should be created");
-    let mut source_data = sample_source_data();
-    source_data.municipalities.clear();
-    source_data.forecasts.clear();
-    source_data.daily_forecasts.clear();
-    for id in ["35001", "35019", "35020", "36001"] {
-        source_data
-            .municipalities
-            .insert(id.to_owned(), format!("Municipality {id}"));
-        source_data.forecasts.push(sample_forecast(id));
-        source_data.daily_forecasts.push(sample_daily_forecast(id));
+fn app_generation_is_deterministic() {
+    let first = tempfile::tempdir().expect("temporary root");
+    let second = tempfile::tempdir().expect("temporary root");
+    let (first_output, first_paths) = build_app(first.path());
+    let (second_output, second_paths) = build_app(second.path());
+    assert_eq!(first_paths, second_paths);
+    for file in ["index.html", "sw.js"] {
+        assert_eq!(
+            fs::read(first_output.join(file)).expect("file"),
+            fs::read(second_output.join(file)).expect("file"),
+        );
     }
-    let snapshot = build_snapshot(source_data).expect("snapshot should build");
-    let mut statistics = WeatherDataStatistics::default();
-
-    let bundle_files = write_weather_data_files(temporary_root.path(), &snapshot, &mut statistics)
-        .expect("weather-data files should write");
-
-    assert_eq!(bundle_files, 3);
-    assert_eq!(
-        output_paths(temporary_root.path()),
-        [
-            "catalog.json",
-            "forecasts/35/000.json",
-            "forecasts/35/020.json",
-            "forecasts/36/000.json",
-        ]
-    );
-    let first_bundle: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary_root.path().join("forecasts/35/000.json"))
-            .expect("first bundle should be readable"),
-    )
-    .expect("first bundle should decode");
-    let forecasts = first_bundle["forecasts"]
-        .as_object()
-        .expect("bundle forecasts should be an object");
-    assert_eq!(
-        forecasts.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["35001", "35019"]
-    );
-    assert!(forecasts["35019"].get("municipality_id").is_none());
-}
-
-#[test]
-fn weather_snapshot_rejects_duplicate_forecasts() {
-    let mut source_data = sample_source_data();
-    source_data.forecasts.push(source_data.forecasts[0].clone());
-
-    let error = build_snapshot(source_data).expect_err("duplicate forecast should fail");
-
-    assert!(error.to_string().contains("duplicate forecast ID"));
 }
 
 fn output_paths(root: &Path) -> Vec<String> {
@@ -822,406 +735,8 @@ fn output_paths(root: &Path) -> Vec<String> {
     paths
 }
 
-fn find_hashed_path<'a>(
-    paths: &'a [String],
-    directory: &str,
-    stem: &str,
-    extension: &str,
-) -> &'a str {
-    paths
-        .iter()
-        .find(|path| {
-            let path = Path::new(path);
-            let parent = path
-                .parent()
-                .and_then(Path::to_str)
-                .expect("generated path parent should be UTF-8");
-            let Some(hashed_stem) = path.file_stem().and_then(|value| value.to_str()) else {
-                return false;
-            };
-            let Some(hash) = hashed_stem
-                .strip_prefix(stem)
-                .and_then(|value| value.strip_prefix('.'))
-            else {
-                return false;
-            };
-            parent == directory
-                && path
-                    .extension()
-                    .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-                && hash.len() == CONTENT_HASH_LENGTH
-                && hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        })
-        .map_or_else(
-            || panic!("missing hashed asset {directory}/{stem}.*.{extension}"),
-            String::as_str,
-        )
-}
-
-fn assert_content_hash(root: &Path, relative_path: &str) {
-    let path = Path::new(relative_path);
-    let hash = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .and_then(|value| value.rsplit_once('.'))
-        .map(|(_, hash)| hash)
-        .expect("hashed filename should contain its digest");
-    let bytes = fs::read(root.join(path)).expect("hashed asset should be readable");
-    let expected = content_hash(&bytes);
-    assert_eq!(hash, expected, "content hash mismatch for {relative_path}");
-}
-
-fn local_javascript_specifiers(source: &str) -> Vec<String> {
-    let mut specifiers = Vec::new();
-    for (quote_position, quote) in source.char_indices() {
-        if !matches!(quote, '"' | '\'') {
-            continue;
-        }
-        let remaining = &source[quote_position + quote.len_utf8()..];
-        if !remaining.starts_with("./") {
-            continue;
-        }
-        let Some(value_end) = remaining.find(quote) else {
-            continue;
-        };
-        let specifier = &remaining[..value_end];
-        if Path::new(specifier)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("js"))
-        {
-            specifiers.push(specifier.to_owned());
-        }
-    }
-    specifiers
-}
-
-fn assert_generated_fonts(root: &Path, paths: &[String], index: &str) {
-    for declaration in [
-        "font-family: \"Manrope\"",
-        "font-display: optional",
-        "font-weight: 200 800",
-        "rel=\"preload\"",
-        "as=\"font\"",
-        "type=\"font/woff2\"",
-        "crossorigin",
-    ] {
-        assert!(index.contains(declaration));
-    }
-
-    for path in [
-        find_hashed_path(paths, "assets/fonts", "manrope-latin-wght", "woff2"),
-        find_hashed_path(paths, "assets/fonts", "manrope-latin-ext-wght", "woff2"),
-    ] {
-        assert!(index.contains(&format!("./{path}")));
-        let font = fs::read(root.join(path)).expect("font should be readable");
-        assert_eq!(font.get(..4), Some(b"wOF2".as_slice()));
-    }
-}
-
-fn assert_application_manifest(root: &Path, paths: &[String], index: &str) {
-    let manifest_path = find_hashed_path(paths, "", "manifest", "webmanifest");
-    assert!(index.contains(&format!("./{manifest_path}")));
-    let manifest_bytes = fs::read(root.join(manifest_path)).expect("manifest should be readable");
-    assert_eq!(manifest_bytes.last(), Some(&b'}'));
-    assert!(!manifest_bytes.contains(&b'\n'));
-    assert!(!manifest_bytes.contains(&b'\t'));
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&manifest_bytes).expect("manifest should decode");
-    assert_eq!(manifest["id"], "./");
-    assert_eq!(manifest["start_url"], "./");
-    for icon in manifest["icons"]
-        .as_array()
-        .expect("manifest icons should be an array")
-    {
-        let path = icon["src"]
-            .as_str()
-            .and_then(|value| value.strip_prefix("./"))
-            .expect("manifest icon should use a relative URL");
-        assert!(
-            paths.contains(&path.to_owned()),
-            "missing manifest icon {path}"
-        );
-    }
-
-    for path in [
-        find_hashed_path(paths, "", "favicon", "svg"),
-        find_hashed_path(paths, "assets/icons", "apple-touch-icon", "png"),
-        find_hashed_path(paths, "assets/scripts", "main", "js"),
-        find_hashed_path(paths, "assets/licenses", "lucide", "txt"),
-        find_hashed_path(paths, "assets/licenses", "manrope", "txt"),
-    ] {
-        assert!(index.contains(&format!("./{path}")));
-    }
-}
-
 fn has_extension(path: &str, extension: &str) -> bool {
     Path::new(path)
         .extension()
         .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-}
-
-#[derive(Default)]
-struct GeneratedDocumentInvariants {
-    ids: HashSet<String>,
-    classes: HashSet<String>,
-    use_targets: Vec<String>,
-    symbol_count: usize,
-}
-
-fn assert_generated_document_invariants(dom: &RcDom) {
-    let mut invariants = GeneratedDocumentInvariants::default();
-    collect_document_invariants(&dom.document, &mut invariants);
-
-    assert_generated_document_ids(&invariants);
-    assert_generated_document_classes(&invariants);
-
-    assert_eq!(invariants.symbol_count, 29);
-    for target in invariants.use_targets {
-        assert!(
-            invariants.ids.contains(&target),
-            "icon reference does not resolve to a generated symbol: #{target}"
-        );
-    }
-}
-
-fn assert_generated_document_ids(invariants: &GeneratedDocumentInvariants) {
-    // Keep controller roots and template-owned elements synchronized with the document.
-    for required_id in [
-        "cielo-application",
-        "locations-view",
-        "municipality-search",
-        "clear-search",
-        "catalog-status",
-        "catalog-retry",
-        "saved-section",
-        "empty-guidance",
-        "empty-search",
-        "saved-list",
-        "results-section",
-        "search-status",
-        "results-list",
-        "search-overflow-status",
-        "source-update",
-        "source-updated-at",
-        "reorder-announcement",
-        "forecast-view",
-        "locations-button",
-        "municipality-title",
-        "municipality-title-text",
-        "current-condition-icon",
-        "current-condition-description",
-        "current-daily-extrema",
-        "current-minimum-temperature",
-        "current-maximum-temperature",
-        "current-temperature-announcement",
-        "current-conditions-message",
-        "hourly-forecast",
-        "hourly-mode-explanation",
-        "hourly-mode-button",
-        "hourly-mode-listbox",
-        "hourly-forecast-list",
-        "daily-forecast-title",
-        "daily-forecast-list",
-        "municipality-row-template",
-        "hourly-forecast-period-template",
-        "daily-forecast-period-template",
-    ] {
-        assert!(
-            invariants.ids.contains(required_id),
-            "generated document is missing required ID {required_id}"
-        );
-    }
-}
-
-fn assert_generated_document_classes(invariants: &GeneratedDocumentInvariants) {
-    for required_class in [
-        "cielo-view",
-        "forecast-screen",
-        "forecast-primary",
-        "forecast-outlook",
-        "forecast-current-summary",
-        "forecast-current-details",
-        "current-reading",
-        "current-daily-extrema",
-        "daily-extrema-pair",
-        "daily-extreme",
-        "daily-extreme-icon",
-        "daily-extreme-temperature",
-        "daily-minimum-extreme",
-        "daily-maximum-extreme",
-        "hourly-scroll",
-        "hourly-mode-explanation",
-        "hourly-mode-picker",
-        "hourly-mode-option",
-        "hourly-hour",
-        "hourly-condition-icon",
-        "hourly-precipitation-probability",
-        "hourly-temperature",
-        "hourly-wind-direction-arrow",
-        "hourly-wind-speed-reading",
-        "hourly-wind-speed",
-        "hourly-wind-speed-separator",
-        "hourly-wind-gust",
-        "hourly-mode-precipitation-probability",
-        "hourly-precipitation-amount",
-        "hourly-humidity-reading",
-        "hourly-humidity-value",
-        "hourly-humidity-unit",
-        "hourly-apparent-temperature",
-        "daily-forecast",
-        "daily-panel",
-        "daily-weekday",
-        "daily-weekday-details",
-        "daily-weekday-name",
-        "daily-date",
-        "daily-condition-icon",
-        "daily-precipitation-probability-cell",
-        "daily-precipitation-probability-description",
-        "daily-precipitation-probability-icon",
-        "daily-precipitation-probability",
-        "daily-row-extrema",
-        "municipality-name",
-        "municipality-province",
-        "open-button",
-        "remove-button",
-        "temperature",
-        "condition-icon",
-    ] {
-        assert!(
-            invariants.classes.contains(required_class),
-            "generated document is missing required class {required_class}"
-        );
-    }
-}
-
-fn collect_document_invariants(handle: &Handle, invariants: &mut GeneratedDocumentInvariants) {
-    if let NodeData::Element {
-        name,
-        attrs,
-        template_contents,
-        ..
-    } = &handle.data
-    {
-        let attributes = attrs.borrow();
-        let id = attribute_value(&attributes, "id");
-        if let Some(id) = &id {
-            assert!(
-                invariants.ids.insert(id.clone()),
-                "generated document contains duplicate ID {id}"
-            );
-        }
-        if let Some(classes) = attribute_value(&attributes, "class") {
-            invariants
-                .classes
-                .extend(classes.split_ascii_whitespace().map(str::to_owned));
-        }
-
-        match name.local.as_ref() {
-            "symbol" => {
-                invariants.symbol_count += 1;
-                assert!(
-                    id.as_deref()
-                        .is_some_and(|value| value.starts_with("cielo-icon-")),
-                    "generated symbol has an invalid ID"
-                );
-                assert!(
-                    attribute_value(&attributes, "viewBox").is_some(),
-                    "generated symbol is missing a viewBox"
-                );
-                assert!(
-                    attribute_value(&attributes, "width").is_none()
-                        && attribute_value(&attributes, "height").is_none(),
-                    "generated symbol retains intrinsic dimensions"
-                );
-            }
-            "use" => {
-                if let Some(target) = attribute_value(&attributes, "href") {
-                    let target = target
-                        .strip_prefix('#')
-                        .expect("icon reference should be document-local");
-                    invariants.use_targets.push(target.to_owned());
-                }
-            }
-            _ => {}
-        }
-        drop(attributes);
-
-        if let Some(contents) = template_contents.borrow().as_ref() {
-            collect_document_invariants(contents, invariants);
-        }
-    }
-
-    for child in handle.children.borrow().iter() {
-        collect_document_invariants(child, invariants);
-    }
-}
-
-fn attribute_value(attributes: &[html5ever::Attribute], name: &str) -> Option<String> {
-    attributes
-        .iter()
-        .find(|attribute| attribute.name.local.as_ref() == name)
-        .map(|attribute| attribute.value.to_string())
-}
-
-fn sample_source_data() -> AemetWeatherData {
-    AemetWeatherData {
-        municipalities: HashMap::from([("35001".to_owned(), "Agaete".to_owned())]),
-        forecasts: vec![sample_forecast("35001")],
-        daily_forecasts: vec![sample_daily_forecast("35001")],
-    }
-}
-
-fn sample_daily_forecast(id: &str) -> MunicipalityDailyForecast {
-    MunicipalityDailyForecast {
-        id: id.to_owned(),
-        generated_at: "2026-07-25T08:00:00".to_owned(),
-        summaries: vec![DailySummary {
-            date: "2026-07-25".to_owned(),
-            minimum_temperature_celsius: 18,
-            maximum_temperature_celsius: 26,
-            condition: Some(WeatherCondition::CloudSun),
-            description: Some("Intervalos nubosos".to_owned()),
-            precipitation_probability: Some(PrecipitationProbability {
-                period: "00-24".to_owned(),
-                percent: 45,
-            }),
-        }],
-    }
-}
-
-fn sample_forecast(id: &str) -> MunicipalityForecast {
-    let province = match id.get(..2) {
-        Some("36") => "Pontevedra",
-        _ => "Las Palmas (Gran Canaria)",
-    };
-
-    MunicipalityForecast {
-        id: id.to_owned(),
-        name: "Forecast fallback".to_owned(),
-        province: province.to_owned(),
-        generated_at: "2026-07-25T08:00:00".to_owned(),
-        daily_forecasts: vec![DailyForecast {
-            date: "2026-07-25".to_owned(),
-            sunrise: "07:10".to_owned(),
-            sunset: "20:55".to_owned(),
-            precipitation_probabilities: vec![PrecipitationProbability {
-                period: "08-14".to_owned(),
-                percent: 60,
-            }],
-            hourly_forecasts: vec![HourlyForecast {
-                hour: 10,
-                temperature_celsius: 24,
-                condition: WeatherCondition::CloudSun,
-                description: "Intervalos nubosos".to_owned(),
-                precipitation_amount: Some(PrecipitationAmount::Trace),
-                wind_direction: Some("NE".to_owned()),
-                wind_speed_kilometres_per_hour: Some(18),
-                maximum_gust_kilometres_per_hour: Some(32),
-                relative_humidity_percent: Some(64),
-                apparent_temperature_celsius: Some(26),
-            }],
-        }],
-    }
 }
