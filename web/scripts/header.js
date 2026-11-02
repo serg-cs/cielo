@@ -64,6 +64,9 @@ export class PlaceHeader {
     this.title.textContent = title;
     this.title.title = title;
     this.subtitle.textContent = subtitle;
+    this.subtitle.hidden = !subtitle;
+    // A name alone (no province) gets a shorter bar, so it does not look empty.
+    this.element.classList.toggle("title-only", !subtitle);
     this.saveButton.hidden = saved || !known;
     this.saveButton.setAttribute("aria-label", `Guardar ${title} en mis lugares`);
   }

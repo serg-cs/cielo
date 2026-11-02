@@ -65,13 +65,17 @@ export class LocationsView {
         this.renderList();
       },
       onkeydown: (/** @type {KeyboardEvent} */ event) => {
-        if (event.key === "Escape" && this.input.value) {
-          this.clearSearch();
-        }
-        if (event.key === "Enter") {
-          // Open the first result.
+        if (event.key === "Escape") {
+          // First clears the text, then leaves the field.
+          if (this.input.value) this.clearSearch();
+          else this.input.blur();
+        } else if (event.key === "ArrowDown") {
+          // From the keyboard, down goes into the results.
           const first = /** @type {HTMLAnchorElement | null} */ (this.list.querySelector(".results a"));
-          first?.click();
+          if (first) {
+            event.preventDefault();
+            first.focus();
+          }
         }
       },
     });
@@ -119,7 +123,12 @@ export class LocationsView {
         "form.search",
         {
           role: "search",
-          onsubmit: (/** @type {Event} */ event) => event.preventDefault(),
+          // Enter (the keyboard's search key) only hides the keyboard, so
+          // the results can be seen and picked.
+          onsubmit: (/** @type {Event} */ event) => {
+            event.preventDefault();
+            this.input.blur();
+          },
         },
         h("label.visually-hidden", { for: "search" }, "Buscar municipio o playa"),
         icon("search", "icon search-icon"),
@@ -136,6 +145,19 @@ export class LocationsView {
     this.input.value = "";
     this.query = "";
     this.renderList();
+  }
+
+  /**
+   * Close the search when the list is left: coming back shows the saved
+   * places, not the old results.
+   *
+   * @returns {boolean} Whether a search was open.
+   */
+  closeSearch() {
+    const open = this.query.trim().length > 0;
+    this.input.blur();
+    if (this.input.value || this.query) this.clearSearch();
+    return open;
   }
 
   /**
@@ -456,10 +478,6 @@ export class LocationsView {
                 href: placeHref(place.id),
                 onpointerdown: () => this.onPrefetch(place.id),
                 onfocus: () => this.onPrefetch(place.id),
-                onclick: () => {
-                  this.input.value = "";
-                  this.query = "";
-                },
               },
               h(
                 "span.result-kind",

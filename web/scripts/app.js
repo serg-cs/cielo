@@ -269,6 +269,7 @@ export class App {
 
   /** @param {Route} route */
   navigate(route) {
+    if (route.view !== "locations") this.leaveLocations();
     const hash = formatRoute(route);
     if (hash !== location.hash) {
       const depth = route.view === "locations" ? 0 : historyDepth() + 1;
@@ -282,6 +283,16 @@ export class App {
       history.pushState({ depth, overPlace }, "", hash);
     }
     this.applyRoute(route);
+  }
+
+  /**
+   * Close the search when a place is opened from the list. The list is
+   * then remembered at the top, so going back shows the saved places.
+   */
+  leaveLocations() {
+    if (this.route.view === "locations" && this.locations.closeSearch()) {
+      window.scrollTo(0, 0);
+    }
   }
 
   /**
@@ -318,6 +329,7 @@ export class App {
   applyRoute(route, { restoreScroll = false } = {}) {
     const previous = this.route;
     const changedView = screenOf(previous) !== screenOf(route);
+    if (changedView && route.view !== "locations") this.leaveLocations();
     if (changedView) {
       this.scrollPositions.set(screenOf(previous), window.scrollY);
       this.pendingScroll = null;
