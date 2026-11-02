@@ -6,7 +6,7 @@
  */
 
 import { temperatureGradient } from "./cards.js";
-import { h, icon } from "./dom.js";
+import { h, icon, swipeToClose } from "./dom.js";
 
 /**
  * @typedef {object} GuideSection
@@ -120,7 +120,9 @@ export const GUIDE_SECTIONS = [
         ["Moderado", "21 a 40 km/h"],
         ["Fuerte", "41 a 70 km/h"],
         ["Muy fuerte", "71 a 120 km/h"],
+        ["Huracanado", "más de 120 km/h"],
       ]),
+      h("p.guide-note", null, "Las flechas y los números del viento llevan el color de su fuerza."),
     ],
   },
   {
@@ -236,7 +238,9 @@ export class Guide {
     this.body = h(
       "div.sheet-body.guide-body",
       null,
-      h("nav.guide-index", { "aria-label": "Secciones" }, [
+      // A table of contents: each entry jumps down to its section.
+      h("nav.guide-index", { "aria-labelledby": "guide-index-title" }, [
+        h("h3.guide-index-title", { id: "guide-index-title" }, "Contenido"),
         h(
           "ul",
           { role: "list" },
@@ -245,10 +249,17 @@ export class Guide {
               "li",
               null,
               h(
-                "button.guide-chip",
-                { type: "button", onclick: () => this.scrollTo(section.id) },
+                "a.guide-link",
+                {
+                  href: `#guide-${section.id}`,
+                  onclick: (/** @type {MouseEvent} */ event) => {
+                    event.preventDefault();
+                    this.scrollTo(section.id);
+                  },
+                },
                 icon(section.icon, "icon icon-small"),
-                section.title,
+                h("span", null, section.title),
+                icon("chevron-right", "icon icon-small guide-link-arrow"),
               ),
             ),
           ),
@@ -284,6 +295,7 @@ export class Guide {
       ),
       this.body,
     );
+    swipeToClose(dialog);
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog) dialog.close();
     });

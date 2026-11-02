@@ -7,6 +7,8 @@
   --color-surface: #2d2a2e;
   --color-surface-muted: #363337;
   --color-surface-strong: #403e41;
+  --color-surface-hover: #333034;
+  --color-surface-pressed: #3a373b;
   --color-border: rgb(252 252 250 / 8%);
 
   /* Text: every pair passes WCAG AA on every surface. */
@@ -33,7 +35,7 @@
   --color-rain: var(--mono-cyan);
   --color-rain-soft: rgb(120 220 232 / 14%);
   --color-snow: #c1c0c0;
-  --color-wind: var(--mono-green);
+  /* Wind has no colour of its own: it takes its strength's severity. */
   --icon-sun: #ffd866;
   --icon-accent: #78dce8;
 
@@ -45,21 +47,31 @@
   --color-on-warning-orange: #29242a;
   --color-on-warning-red: #29242a;
 
-  /* Scales */
-  --uv-1: #a9dc76;
-  --uv-2: #ffd866;
-  --uv-3: #fc9867;
-  --uv-4: #ff6188;
-  --uv-5: #ab9df2;
-  --fire-1: #78dce8;
-  --fire-2: #5fb8d8;
-  --fire-3: #a9dc76;
-  --fire-4: #ffd866;
-  --fire-5: #fc9867;
-  --fire-6: #ff6188;
-  --level-1: var(--mono-green);
-  --level-2: var(--mono-yellow);
-  --level-3: var(--mono-red);
+  /* One severity scale for every graded value (wind, waves, UV, fire):
+     grey is calm or nothing, then green, yellow, orange, red and purple
+     as it gets worse. A colour means the same everywhere. */
+  --severity-0: #8b898c;
+  --severity-1: var(--mono-green);
+  --severity-2: var(--mono-yellow);
+  --severity-3: var(--mono-orange);
+  --severity-4: var(--mono-red);
+  --severity-5: var(--mono-purple);
+
+  --uv-1: var(--severity-1);
+  --uv-2: var(--severity-2);
+  --uv-3: var(--severity-3);
+  --uv-4: var(--severity-4);
+  --uv-5: var(--severity-5);
+  --fire-1: color-mix(in srgb, var(--severity-1) 55%, var(--severity-0));
+  --fire-2: var(--severity-1);
+  --fire-3: var(--severity-2);
+  --fire-4: var(--severity-3);
+  --fire-5: var(--severity-4);
+  --fire-6: var(--severity-5);
+  /* Beach wind and waves: flojo, moderado, fuerte. */
+  --level-1: var(--severity-1);
+  --level-2: var(--severity-2);
+  --level-3: var(--severity-3);
 
   /* Shape and spacing (rem, so they follow the text size) */
   --space-1: 0.25rem;
@@ -70,6 +82,7 @@
   --space-6: 2rem;
   --radius-card: 1.25rem;
   --radius-control: 0.75rem;
+  --radius-tile: 1rem;
   --radius-pill: 999rem;
   --touch-target: 2.75rem;
   --content-width: 68rem;

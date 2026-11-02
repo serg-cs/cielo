@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fireDanger, sky, uvCategory, warningPhenomenon, windDirection } from "../../web/scripts/codes.js";
+import {
+  WIND_LEVEL_LIMITS,
+  fireDanger,
+  sky,
+  uvCategory,
+  warningPhenomenon,
+  windDirection,
+  windLevel,
+  windStrength,
+} from "../../web/scripts/codes.js";
 
 test("every AEMET sky code has an icon and a Spanish label", () => {
   const codes = [
@@ -35,6 +44,37 @@ test("wind directions", () => {
   assert.equal(windDirection("C").label, "calma");
   assert.equal(windDirection("VRB").degrees, null);
   assert.equal(windDirection(undefined).label, "");
+});
+
+test("wind colour levels follow AEMET's wind terms, with calm on its own", () => {
+  assert.equal(windLevel(null), null);
+  // Calma, flojo, moderado, fuerte, muy fuerte, huracanado.
+  const speeds = [0, 5, 6, 20, 21, 40, 41, 70, 71, 120, 121];
+  assert.deepEqual(
+    speeds.map((speed) => windLevel(speed)),
+    [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5],
+  );
+  assert.deepEqual(
+    speeds.map((speed) => windStrength(speed)),
+    [
+      "Calma",
+      "Calma",
+      "Flojo",
+      "Flojo",
+      "Moderado",
+      "Moderado",
+      "Fuerte",
+      "Fuerte",
+      "Muy fuerte",
+      "Muy fuerte",
+      "Huracanado",
+    ],
+  );
+  // Each limit is the first speed of the next level.
+  WIND_LEVEL_LIMITS.forEach((limit, index) => {
+    assert.equal(windLevel(limit), index + 1);
+    assert.equal(windLevel(limit - 1), index);
+  });
 });
 
 test("UV and fire categories", () => {

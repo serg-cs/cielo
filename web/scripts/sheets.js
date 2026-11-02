@@ -4,6 +4,7 @@
 
 import {
   WARNING_LEVELS,
+  WIND_LEVEL_LIMITS,
   fireDanger,
   sky,
   uvCategory,
@@ -12,12 +13,13 @@ import {
   windLevel,
   windStrength,
 } from "./codes.js";
-import { scale, sunBar, temperatureRange, tile, warningOnDate, warningTiming } from "./cards.js";
+import { TEMPERATURE_STOPS, scale, sunBar, temperatureRange, tile, warningOnDate, warningTiming } from "./cards.js";
 import { chart, chartRange } from "./chart.js";
 import { h, icon, infoButton, windArrow } from "./dom.js";
 import {
   amount,
   capitalize,
+  clockTime,
   dayMonth,
   dayName,
   degrees,
@@ -162,7 +164,7 @@ export function daySheet(forecast, date, now, onClose, warnings, warningsHref) {
               values.wind != null
                 ? h(
                     "span.part-wind",
-                    { class: `part-wind wind-level-${windLevel(values.wind)}` },
+                    { class: `part-wind wind-level-${windLevel(values.wind) ?? 0}` },
                     direction.degrees === null || values.wind < 6
                       ? icon("wind", "icon icon-tiny")
                       : windArrow(direction.degrees, "icon icon-tiny"),
@@ -179,7 +181,19 @@ export function daySheet(forecast, date, now, onClose, warnings, warningsHref) {
 
   const hours = hoursOfDay(forecast, date).filter((hour) => hour.temp !== null);
   const hoursSection =
-    hours.length >= 3 ? h("section.sheet-section", null, h("h3", null, "Por horas"), dayCharts(hours, timeZone)) : null;
+    hours.length >= 3
+      ? h(
+          "section.sheet-section",
+          null,
+          h("h3", null, "Por horas"),
+          h("p.sheet-hint", null, icon("pointer", "icon icon-small"), "Toca un gráfico para ver cada hora"),
+          dayCharts(
+            hours,
+            timeZone,
+            date === today ? localHour(now, timeZone) + Number(clockTime(now, timeZone).slice(3, 5)) / 60 : null,
+          ),
+        )
+      : null;
 
   const details = dayTiles(forecast, day, summary, hours, date === today ? now : null);
   return sheet(
@@ -251,7 +265,7 @@ function dayTiles(forecast, day, summary, hours, now) {
         value: [h("span.value-number", null, wind), h("span.value-unit", null, " km/h")],
         visual: h(
           "span.compass",
-          { "aria-hidden": "true" },
+          { class: `compass wind-level-${windLevel(wind) ?? 0}`, "aria-hidden": "true" },
           direction.degrees === null || wind < 6
             ? h("span.compass-calm", null, wind < 6 ? "Calma" : direction.short || "")
             : windArrow(direction.degrees, "icon"),
@@ -280,7 +294,7 @@ function dayTiles(forecast, day, summary, hours, now) {
       tile({
         iconName: "umbrella",
         guide: "precipitacion",
-        title: "Precipitación",
+        title: "Lluvia",
         value: [h("span.value-number", null, `${summary.pop}`), h("span.value-unit", null, "%")],
         detail: [
           now === null ? "Probabilidad en el día" : "Probabilidad en el resto del día",
@@ -451,14 +465,18 @@ export function warningsSheet(warnings, timeZone, now, onClose) {
   );
 }
 
+/** Wind colours by speed: the severity scale, in hard steps. @type {Array<[number, string]>} */
+const WIND_COLORS = [0, ...WIND_LEVEL_LIMITS].map((speed, level) => [speed, `var(--severity-${level})`]);
+
 /**
- * Charts for the hours of one day: temperature, precipitation (when any is
- * possible), wind and humidity.
+ * Charts for the hours of one day: temperature, rain, wind and humidity.
+ * Today's charts mark the current hour.
  *
  * @param {import("./forecast.js").Hour[]} hours
  * @param {string} timeZone
+ * @param {number | null} now Current hour (0-24, fractional), on today's charts.
  */
-function dayCharts(hours, timeZone) {
+function dayCharts(hours, timeZone, now) {
   const at = hours.map((hour) => localHour(hour.time, timeZone));
   const time = (/** @type {number} */ index) => `${at[index]}:00`;
   const present = (/** @type {Array<number | null>} */ values) =>
@@ -478,12 +496,14 @@ function dayCharts(hours, timeZone) {
   const rounded = (/** @type {number} */ value) => millimetres(value < 0.1 ? "Ip" : Math.round(value * 10) / 10);
   const rainClass = snow ? "snow" : "rain";
 
+  const shared = { hours: at, now };
+
   const charts = [
     chart({
+      ...shared,
       title: "Temperatura",
       iconName: "thermometer",
       summary: `mínima ${degrees(Math.min(...present(temps)))}, máxima ${degrees(Math.max(...present(temps)))}`,
-      hours: at,
       series: [
         ...(showFeels
           ? [
@@ -498,6 +518,8 @@ function dayCharts(hours, timeZone) {
           values: temps,
           kind: /** @type {const} */ ("line"),
           className: "temperature",
+          colors: TEMPERATURE_STOPS,
+          area: true,
         },
       ],
       range: chartRange(showFeels ? [...temps, ...feels] : temps, {
@@ -528,67 +550,80 @@ function dayCharts(hours, timeZone) {
         : [],
     }),
   ];
-  // Precipitation is charted when some is forecast or reasonably likely.
-  if (total > 0 || present(pops).some((pop) => pop >= 20)) {
-    charts.push(
-      chart({
-        title: "Precipitación",
-        iconName: "umbrella",
-        summary: total > 0 ? `${rounded(total)} en el día` : `probabilidad de hasta ${Math.max(...present(pops))}%`,
-        hours: at,
-        series: [
-          { values: rain, kind: "bars", className: rainClass },
-          {
-            values: pops,
-            kind: "step",
-            className: "probability",
-            range: [0, 100],
-          },
-        ],
-        range: chartRange(rain, { floor: 0, minimumSpan: 2, step: 2 }),
-        describe: (index) => ({
-          time: time(index),
-          readings: [
-            {
-              value: rain[index] > 0 ? rounded(rain[index]) : "0\u00a0mm",
-              // "Unas gotas" needs no "lluvia" after it.
-              label: rain[index] > 0 && rain[index] < 0.1 ? undefined : snow ? "nieve" : "lluvia",
-              className: rainClass,
-            },
-            ...(pops[index] !== null
-              ? [
-                  {
-                    value: `${pops[index]}%`,
-                    label: "prob.",
-                    className: "probability",
-                  },
-                ]
-              : []),
-          ],
-        }),
-        label: (value) => `${Math.round(value * 10) / 10}\u00a0mm`,
-        key: [
-          [rainClass, snow ? "Nieve (l/m²)" : "Lluvia (l/m²)"],
-          ["probability", "Probabilidad (0–100 %)"],
-        ],
-      }),
-    );
-  }
+  // Rain is always charted, so every day reads the same; a dry day shows
+  // flat at zero.
   charts.push(
     chart({
+      ...shared,
+      title: "Lluvia",
+      iconName: "umbrella",
+      summary:
+        total > 0
+          ? `${rounded(total)} en el día`
+          : `probabilidad de hasta ${Math.max(0, ...present(pops))}%`,
+      series: [
+        {
+          values: pops,
+          kind: "line",
+          className: "probability",
+          range: [0, 100],
+          area: true,
+        },
+        { values: rain, kind: "bars", className: rainClass },
+      ],
+      range: chartRange(rain, { floor: 0, minimumSpan: 2, step: 2 }),
+      describe: (index) => ({
+        time: time(index),
+        readings: [
+          {
+            value: rain[index] > 0 ? rounded(rain[index]) : "0\u00a0mm",
+            // "Unas gotas" needs no "lluvia" after it.
+            label: rain[index] > 0 && rain[index] < 0.1 ? undefined : snow ? "nieve" : "lluvia",
+            className: rainClass,
+          },
+          ...(pops[index] !== null
+            ? [
+                {
+                  value: `${pops[index]}%`,
+                  label: "prob.",
+                  className: "probability",
+                },
+              ]
+            : []),
+        ],
+      }),
+      label: (value) => number(Math.round(value * 10) / 10, value % 1 ? 1 : 0),
+      unit: "mm",
+      key: [
+        [rainClass, snow ? "Nieve (l/m²)" : "Lluvia (l/m²)"],
+        ["probability", "Probabilidad (0–100 %)"],
+      ],
+    }),
+  );
+  charts.push(
+    chart({
+      ...shared,
       title: "Viento",
       iconName: "wind",
       summary: `hasta ${Math.max(...present(wind), 0)} km/h${present(gusts).length ? `, rachas de ${Math.max(...present(gusts))} km/h` : ""}`,
-      hours: at,
       series: [
-        { values: gusts, kind: "line", className: "gust" },
-        { values: wind, kind: "line", className: "wind" },
+        { values: gusts, kind: "line", className: "gust", colors: WIND_COLORS, hard: true },
+        { values: wind, kind: "line", className: "wind", colors: WIND_COLORS, hard: true },
       ],
       range: chartRange([...wind, ...gusts], {
         floor: 0,
         minimumSpan: 20,
         step: 10,
       }),
+      // A direction every three hours, in the colour of its strength.
+      arrows: hours
+        .map((hour, index) => ({ hour, index }))
+        .filter(({ index }) => at[index] % 3 === 1)
+        .map(({ hour, index }) => ({
+          index,
+          degrees: (hour.wind ?? 0) < 6 ? null : windDirection(hour.wdir).degrees,
+          level: windLevel(hour.wind),
+        })),
       describe: (index) => {
         const direction = windDirection(hours[index].wdir);
         const calm = (wind[index] ?? 0) < 6;
@@ -614,7 +649,8 @@ function dayCharts(hours, timeZone) {
           ],
         };
       },
-      label: (value) => `${value}\u00a0km/h`,
+      label: (value) => String(value),
+      unit: "km/h",
       key: present(gusts).length
         ? [
             ["wind", "Viento medio"],
@@ -626,17 +662,18 @@ function dayCharts(hours, timeZone) {
   if (present(humidity).length) {
     charts.push(
       chart({
+        ...shared,
         title: "Humedad",
         iconName: "droplet",
         summary: `entre ${Math.min(...present(humidity))}% y ${Math.max(...present(humidity))}%`,
-        hours: at,
-        series: [{ values: humidity, kind: "line", className: "humidity" }],
+        series: [{ values: humidity, kind: "line", className: "humidity", area: true }],
         range: [0, 100],
         describe: (index) => ({
           time: time(index),
           readings: [{ value: `${humidity[index] ?? "—"}%` }],
         }),
-        label: (value) => `${value}%`,
+        label: (value) => String(value),
+        unit: "%",
       }),
     );
   }

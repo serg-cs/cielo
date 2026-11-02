@@ -4,7 +4,7 @@
 
 import { beachSky, sky } from "./codes.js";
 import { DataStore } from "./data-store.js";
-import { replaceChildren } from "./dom.js";
+import { replaceChildren, swipeToClose } from "./dom.js";
 import { checkedAt, localDate, localHour } from "./format.js";
 import { currentHour, decodeForecast } from "./forecast.js";
 import {
@@ -30,6 +30,10 @@ const MINUTE = 60 * 1000;
 const FORECAST_MAX_AGE = 10 * MINUTE;
 const PLACES_MAX_AGE = 6 * 60 * MINUTE;
 const EXTRAS_MAX_AGE = 60 * MINUTE;
+/** Days of a beach whose forecast is not loaded; one array, so it never looks like new data. */
+const NO_DAYS = Object.freeze([]);
+/** A relaunch within this time opens where the page was left. */
+const SCROLL_MEMORY = 30 * MINUTE;
 
 /** @typedef {import("./router.js").Route} Route */
 
@@ -52,6 +56,12 @@ export class App {
     /** Scroll position of each screen, by its route. @type {Map<string, number>} */
     this.scrollPositions = new Map();
     this.renderQueued = false;
+    /** A finger or button is down (since when, ms), or 0. */
+    this.pointerDownAt = 0;
+    /** Background renders wait until this time (performance.now()). */
+    this.quietUntil = 0;
+    /** Scroll position to restore once the page is tall enough, after a relaunch. @type {number | null} */
+    this.pendingScroll = null;
     this.sheetKey = "";
     /** Page scroll when the sheet opened, kept while it is open. */
     this.sheetPageScroll = 0;
@@ -96,8 +106,7 @@ export class App {
       const pageScroll = this.sheetPageScroll;
       const screen = this.sheetScreen;
       const keep = () => {
-        const current = this.route.view === "locations" ? "#/" : formatRoute({ ...this.route, sheet: null });
-        if (current === screen && window.scrollY !== pageScroll) window.scrollTo(0, pageScroll);
+        if (screenOf(this.route) === screen && window.scrollY !== pageScroll) window.scrollTo(0, pageScroll);
       };
       keep();
       requestAnimationFrame(keep);
@@ -105,6 +114,7 @@ export class App {
         this.closeSheet();
       }
     });
+    swipeToClose(this.dialog);
     this.dialog.addEventListener("click", (event) => {
       // A click on the backdrop closes the sheet.
       if (event.target === this.dialog) this.dialog.close();
@@ -147,10 +157,59 @@ export class App {
       const route = parseRoute(link.getAttribute("href") ?? "#/");
       requestAnimationFrame(() => this.navigate(route));
     });
+    // Background updates wait while the user touches or scrolls the page:
+    // rebuilding the element under the finger loses the tap, and changing
+    // the page during a scroll can move it.
+    const quiet = (/** @type {number} */ ms) => {
+      this.quietUntil = Math.max(this.quietUntil, performance.now() + ms);
+    };
+    const options = { capture: true, passive: true };
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        this.pointerDownAt = performance.now();
+        this.pendingScroll = null;
+      },
+      options,
+    );
+    const release = () => {
+      this.pointerDownAt = 0;
+      quiet(500);
+    };
+    document.addEventListener("pointerup", release, options);
+    document.addEventListener("pointercancel", release, options);
+    // Any scroller, including the hours strip (scroll events do not bubble).
+    document.addEventListener("scroll", () => quiet(300), options);
+    // Scrolling by wheel or keys also means the user has taken over.
+    const takeOver = () => {
+      this.pendingScroll = null;
+    };
+    window.addEventListener("wheel", takeOver, { passive: true });
+    window.addEventListener("keydown", takeOver);
+    // Lets iOS show the pressed (:active) state of buttons and rows.
+    document.addEventListener("touchstart", () => {}, { passive: true });
+
+    // Remember where the page is, for a relaunch.
+    let saveTimer = 0;
+    const saveScroll = () => {
+      clearTimeout(saveTimer);
+      saveTimer = 0;
+      preferences.setScrollMemory(screenOf(this.route), window.scrollY);
+    };
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (!saveTimer) saveTimer = setTimeout(saveScroll, 400);
+      },
+      { passive: true },
+    );
+    window.addEventListener("pagehide", saveScroll);
+
     this.store.addEventListener("change", () => this.scheduleRender());
     window.addEventListener("online", () => this.store.refreshAll(0));
     window.addEventListener("offline", () => this.scheduleRender());
     document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") saveScroll();
       if (document.visibilityState === "visible") {
         this.store.refreshAll(FORECAST_MAX_AGE);
         this.scheduleRender();
@@ -165,9 +224,9 @@ export class App {
     }, FORECAST_MAX_AGE);
 
     // Every history entry records how many steps it is from the list
-    // (`depth`), so the back arrow can return to the list in one step.
-    // The list is always the first entry: on launch the last opened place,
-    // or a place opened from a link, goes on top of it.
+    // (`depth`), so the back arrow knows whether there is a screen of the
+    // app to go back to. The list is always the first entry: on launch the
+    // last opened place, or a place opened from a link, goes on top of it.
     let launch = location.hash;
     if (!launch || launch === "#" || launch === "#/") {
       const last = preferences.lastOpenedId();
@@ -175,7 +234,15 @@ export class App {
     }
     history.replaceState({ depth: 0 }, "", "#/");
     if (launch !== "#/") history.pushState({ depth: 1 }, "", launch);
-    this.applyRoute(parseRoute(location.hash));
+    const launchRoute = parseRoute(location.hash);
+    this.applyRoute(launchRoute);
+    // After the launch screen is shown (showing it starts at the top), go
+    // back to where it was left, once its content is tall enough.
+    const memory = preferences.scrollMemory();
+    if (memory && memory.y > 0 && Date.now() - memory.at < SCROLL_MEMORY && memory.screen === screenOf(launchRoute)) {
+      this.pendingScroll = memory.y;
+      this.restoreScroll();
+    }
     void this.store.load(PLACES_PATH, { maxAge: PLACES_MAX_AGE });
     void this.store.load(WARNINGS_PATH, { maxAge: FORECAST_MAX_AGE });
     for (const id of this.saved) this.loadPlace(id);
@@ -209,16 +276,22 @@ export class App {
       const current = this.route;
       const overPlace =
         route.view !== "locations" && route.sheet !== null && current.view === route.view && current.id === route.id;
+      // The entry being left keeps its scroll position, so going back to it
+      // returns to the same place even if the screen is visited again later.
+      history.replaceState({ ...history.state, scroll: Math.round(window.scrollY) }, "", location.hash);
       history.pushState({ depth, overPlace }, "", hash);
     }
     this.applyRoute(route);
   }
 
-  /** The back arrow: straight to the list, however deep the current screen is. */
+  /**
+   * The back arrow: to the previous screen, like the system's back. Sheets
+   * and the guide remove their own entries when they close, so the entry
+   * before this one is always a screen.
+   */
   goBack() {
-    const depth = historyDepth();
-    if (depth > 0) {
-      history.go(-depth);
+    if (historyDepth() > 0) {
+      history.back();
     } else {
       // An entry without depth (a URL typed by hand): replace it with the list.
       history.replaceState({ depth: 0 }, "", "#/");
@@ -232,7 +305,7 @@ export class App {
       history.back();
     } else {
       // Opened from a link: show the place under it in the same entry.
-      history.replaceState({ depth: historyDepth() }, "", formatRoute({ ...this.route, sheet: null }));
+      history.replaceState({ depth: historyDepth() }, "", screenOf(this.route));
       this.applyRoute(parseRoute(location.hash));
     }
   }
@@ -244,10 +317,11 @@ export class App {
    */
   applyRoute(route, { restoreScroll = false } = {}) {
     const previous = this.route;
-    const screen = (/** @type {Route} */ value) =>
-      formatRoute(value.view === "locations" ? value : { ...value, sheet: null });
-    const changedView = screen(previous) !== screen(route);
-    if (changedView) this.scrollPositions.set(screen(previous), window.scrollY);
+    const changedView = screenOf(previous) !== screenOf(route);
+    if (changedView) {
+      this.scrollPositions.set(screenOf(previous), window.scrollY);
+      this.pendingScroll = null;
+    }
     this.route = route;
     this.depth = historyDepth();
     this.locationsSection.hidden = route.view !== "locations";
@@ -266,7 +340,9 @@ export class App {
     // A new screen starts at the top (or where it was left, going back or to
     // the list) and moves focus to its heading. Sheets never move the page.
     if (changedView) {
-      const remembered = this.scrollPositions.get(screen(route));
+      const entry = /** @type {{scroll?: unknown} | null} */ (history.state)?.scroll;
+      const remembered =
+        restoreScroll && typeof entry === "number" ? entry : this.scrollPositions.get(screenOf(route));
       window.scrollTo(0, (restoreScroll || route.view === "locations") && remembered !== undefined ? remembered : 0);
       if (route.view === "forecast") this.forecastView.focusTitle();
       else if (route.view === "beach") this.beachView.focusTitle();
@@ -285,13 +361,39 @@ export class App {
     this.render();
   }
 
+  /** Render on the next frame, once the user is not touching or scrolling. */
   scheduleRender() {
     if (this.renderQueued) return;
     this.renderQueued = true;
-    requestAnimationFrame(() => {
-      this.renderQueued = false;
-      this.render();
-    });
+    const attempt = () => {
+      const now = performance.now();
+      // A press that never ended (a lost pointerup) stops counting after 3 s.
+      const pressed = this.pointerDownAt > 0 && now - this.pointerDownAt < 3000;
+      const wait = pressed ? 150 : this.quietUntil - now;
+      if (wait > 0) {
+        setTimeout(attempt, wait);
+        return;
+      }
+      requestAnimationFrame(() => {
+        if (this.pointerDownAt > 0 && performance.now() - this.pointerDownAt < 3000) {
+          attempt();
+          return;
+        }
+        this.renderQueued = false;
+        this.render();
+      });
+    };
+    attempt();
+  }
+
+  /** After a relaunch, go back to where the page was once it is tall enough. */
+  restoreScroll() {
+    if (this.pendingScroll === null) return;
+    const room = document.documentElement.scrollHeight - window.innerHeight;
+    if (room >= this.pendingScroll - 1) {
+      window.scrollTo(0, this.pendingScroll);
+      this.pendingScroll = null;
+    }
   }
 
   /**
@@ -335,7 +437,7 @@ export class App {
       .filter((beach) => beach.municipalityId === id)
       .map((beach) => ({
         name: beach.name,
-        ...(this.beachForecast(beach.id) ?? { id: beach.id, days: [] }),
+        ...(this.beachForecast(beach.id) ?? { id: beach.id, days: NO_DAYS }),
       }));
   }
 
@@ -351,6 +453,11 @@ export class App {
   }
 
   render() {
+    this.renderScreen();
+    this.restoreScroll();
+  }
+
+  renderScreen() {
     const now = Date.now();
     const placesEntry = this.store.peek(PLACES_PATH);
     if (placesEntry.data && placesEntry.data !== this.placesDocument) {
@@ -544,7 +651,7 @@ export class App {
       // behind it (some mobile browsers scroll to the focused element).
       const pageScroll = window.scrollY;
       this.sheetPageScroll = pageScroll;
-      this.sheetScreen = formatRoute({ ...route, sheet: null });
+      this.sheetScreen = screenOf(route);
       this.dialog.showModal();
       const title = /** @type {HTMLElement | null} */ (this.dialog.querySelector(".sheet-title"));
       title?.setAttribute("tabindex", "-1");
@@ -556,6 +663,16 @@ export class App {
       requestAnimationFrame(keep);
     }
   }
+}
+
+/**
+ * The screen a route shows, without its sheet: the key for remembered
+ * scroll positions.
+ *
+ * @param {Route} route
+ */
+function screenOf(route) {
+  return formatRoute(route.view === "locations" ? route : { ...route, sheet: null });
 }
 
 /** Steps from the current history entry back to the list (0 when unknown). */

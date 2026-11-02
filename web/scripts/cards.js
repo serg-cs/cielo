@@ -11,6 +11,7 @@ import {
   uvCategory,
   warningPhenomenon,
   windDirection,
+  windLevel,
   windStrength,
 } from "./codes.js";
 import { h, icon, infoButton, windArrow } from "./dom.js";
@@ -242,36 +243,44 @@ export function dailyCard(days, { today, hour, timeZone, warnings, hrefFor }) {
           "span.day-name",
           { "aria-hidden": "true" },
           h("strong", null, dayName(day.date, today, "short")),
-          h("small", null, dayMonth(day.date, "short")),
+          h(
+            "small",
+            null,
+            dayMonth(day.date, "short"),
+            // A warning is marked by the date, away from the weather icon.
+            warning
+              ? h(
+                  "span.day-warning",
+                  { class: `day-warning level-${warning.level}` },
+                  icon("triangle-alert", "icon icon-tiny"),
+                )
+              : null,
+          ),
         ),
+        // The chance of rain sits under the sky, as in most weather apps.
         h(
-          "span.day-icon",
+          "span.day-sky",
           { "aria-hidden": "true" },
           icon(condition.icon, "icon icon-condition"),
-          warning
-            ? h("span.day-warning", {
-                class: `day-warning level-${warning.level}`,
-              })
-            : null,
+          summary.pop ? h("span.day-pop", null, `${summary.pop}%`) : null,
         ),
         h(
-          "span.day-pop",
+          "span.day-range",
           { "aria-hidden": "true" },
-          summary.pop ? [icon("umbrella", "icon icon-tiny"), `${summary.pop}%`] : "",
+          h("span.day-min", null, degrees(day.tmin)),
+          h(
+            "span.range-track",
+            null,
+            h("span.range-fill", {
+              style: {
+                "--start": `${start}%`,
+                "--end": `${end}%`,
+                "--gradient": gradient,
+              },
+            }),
+          ),
+          h("span.day-max", null, degrees(day.tmax)),
         ),
-        h("span.day-min", { "aria-hidden": "true" }, degrees(day.tmin)),
-        h(
-          "span.range-track",
-          { "aria-hidden": "true" },
-          h("span.range-fill", {
-            style: {
-              "--start": `${start}%`,
-              "--end": `${end}%`,
-              "--gradient": gradient,
-            },
-          }),
-        ),
-        h("span.day-max", { "aria-hidden": "true" }, degrees(day.tmax)),
         icon("chevron-right", "icon icon-small day-chevron"),
       ),
     );
@@ -352,7 +361,7 @@ export function sunBar(sunrise, sunset, progress) {
  *
  * @type {Array<[number, string]>}
  */
-const TEMPERATURE_STOPS = [
+export const TEMPERATURE_STOPS = [
   [-10, "var(--mono-purple)"],
   [0, "var(--mono-cyan)"],
   [10, "var(--mono-green)"],
@@ -450,7 +459,7 @@ export function detailsCard(forecast, hour, today, now) {
         value: [h("span.value-number", null, hour.wind), h("span.value-unit", null, " km/h")],
         visual: h(
           "span.compass",
-          { "aria-hidden": "true" },
+          { class: `compass wind-level-${windLevel(hour.wind) ?? 0}`, "aria-hidden": "true" },
           direction.degrees === null || hour.wind < 6
             ? h("span.compass-calm", null, hour.wind < 6 ? "Calma" : direction.short || "")
             : windArrow(direction.degrees, "icon"),
@@ -474,7 +483,7 @@ export function detailsCard(forecast, hour, today, now) {
       tile({
         iconName: "umbrella",
         guide: "precipitacion",
-        title: "Precipitación",
+        title: "Lluvia",
         value: [h("span.value-number", null, `${risks.pop}`), h("span.value-unit", null, "%")],
         detail: (() => {
           const extras = [

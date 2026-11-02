@@ -1,5 +1,5 @@
 /**
- * Header of a place screen: back, name, a badge when the data is old, and
+ * Header of a place screen: back (to the previous screen), name, a badge when the data is old, and
  * a save button that only shows while the place is not saved.
  */
 
@@ -30,7 +30,7 @@ export class PlaceHeader {
         "button.icon-button.back-button",
         {
           type: "button",
-          "aria-label": "Volver a mis lugares",
+          "aria-label": "Volver",
           onclick: onBack,
         },
         icon("chevron-left"),

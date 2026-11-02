@@ -4,10 +4,23 @@
 
 import { beachLinksCard, dailyCard, detailsCard, nowCard, offlineNote, staleNote, warningsBanner } from "./cards.js";
 import { hourlyCard } from "./card-hourly.js";
-import { h, preserveFocus, replaceChildren } from "./dom.js";
+import { h, identity, preserveFocus, replaceChildren } from "./dom.js";
 import { localDate, localHour } from "./format.js";
 import { currentHour, hoursSummary, upcomingDays, upcomingHours } from "./forecast.js";
 import { PlaceHeader } from "./header.js";
+
+/** Longest time the cards go without being rebuilt (ms). */
+export const RENDER_EVERY = 10 * 60 * 1000;
+
+/**
+ * Everything shown of the warnings, for a view's render key: a warning can
+ * change level or timing and keep its id.
+ *
+ * @param {Warning[]} warnings
+ */
+export function warningsKey(warnings) {
+  return warnings.map((warning) => `${warning.id}:${warning.level}:${warning.onset}:${warning.expires}`).join();
+}
 
 /** @typedef {import("./forecast.js").Forecast} Forecast */
 /** @typedef {import("./places.js").Place} Place */
@@ -43,6 +56,8 @@ export class ForecastView {
     this.renderedId = null;
     /** @type {ForecastState | null} */
     this.state = null;
+    /** What the cards were last built from. */
+    this.renderedKey = "";
 
     this.header = new PlaceHeader(
       {
@@ -82,6 +97,9 @@ export class ForecastView {
     });
 
     if (!forecast) {
+      const emptyKey = `${id}|empty|${status}`;
+      if (this.renderedKey === emptyKey) return;
+      this.renderedKey = emptyKey;
       replaceChildren(this.content, nowCard({ hour: null, today: null, summary: [], status }));
       return;
     }
@@ -90,6 +108,23 @@ export class ForecastView {
     const today = localDate(now, timeZone);
     const hour = localHour(now, timeZone);
     const current = currentHour(forecast, now);
+    // Rebuilding the cards replaces what is under the finger and can move
+    // the page, so it only happens when something shown changed: the data,
+    // the hour, or (for the sun's progress) every 10 minutes.
+    const key = [
+      id,
+      identity(forecast),
+      warningsKey(warnings),
+      beaches.map((beach) => `${beach.id}:${beach.name}:${beach.issued ?? ""}:${identity(beach.days)}`).join(),
+      place?.name ?? "",
+      status ?? "",
+      offline,
+      current?.time ?? "",
+      today,
+      Math.floor(now / RENDER_EVERY),
+    ].join("|");
+    if (key === this.renderedKey) return;
+    this.renderedKey = key;
     const next = upcomingHours(forecast, now);
     const days = upcomingDays(forecast, now);
     const todayForecast = days.find((day) => day.date === today) ?? null;

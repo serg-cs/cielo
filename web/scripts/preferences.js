@@ -54,3 +54,25 @@ export function hourlyMode() {
 
 /** @param {string} mode */
 export const setHourlyMode = (mode) => write(HOURLY_MODE_KEY, mode);
+
+const SCROLL_KEY = "cielo.scroll";
+
+/**
+ * Where the page was, so a relaunch (iOS closes apps in the background)
+ * opens at the same place instead of the top.
+ *
+ * @returns {{screen: string, y: number, at: number} | null}
+ */
+export function scrollMemory() {
+  try {
+    const value = JSON.parse(read(SCROLL_KEY) ?? "null");
+    return value && typeof value.screen === "string" && typeof value.y === "number" && typeof value.at === "number"
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {string} screen @param {number} y */
+export const setScrollMemory = (screen, y) => write(SCROLL_KEY, JSON.stringify({ screen, y, at: Date.now() }));

@@ -4,10 +4,11 @@
 
 import { beachSky, beachWaves, beachWind, sky, uvCategory } from "./codes.js";
 import { offlineNote, staleNote, temperatureRange, warningsBanner } from "./cards.js";
-import { h, icon, infoButton, preserveFocus, replaceChildren } from "./dom.js";
+import { h, icon, identity, infoButton, preserveFocus, replaceChildren } from "./dom.js";
 import { dayMonth, dayName, degrees, localDate, localHour } from "./format.js";
 import { currentHour, daySummary } from "./forecast.js";
 import { PlaceHeader } from "./header.js";
+import { RENDER_EVERY, warningsKey } from "./view-forecast.js";
 
 /** @typedef {import("./places.js").Beach} Beach */
 /** @typedef {import("./forecast.js").Forecast} Forecast */
@@ -170,6 +171,8 @@ export class BeachView {
       "beach-title",
     );
     this.content = h("div.place-content.beach-content");
+    /** What the cards were last built from. */
+    this.renderedKey = "";
     replaceChildren(root, this.header.element, this.content);
   }
 
@@ -199,6 +202,22 @@ export class BeachView {
         (value) => value != null,
       );
     const days = (forecast?.days ?? []).filter((/** @type {any} */ day) => day.date >= today && hasData(day));
+    // Rebuilt only when something shown changed (see the forecast view).
+    const hour = municipality ? currentHour(municipality, now) : null;
+    const key = [
+      id,
+      beach?.name ?? "",
+      identity(forecast?.days),
+      identity(municipality),
+      warningsKey(warnings),
+      status ?? "",
+      offline,
+      hour?.time ?? "",
+      today,
+      Math.floor(now / RENDER_EVERY),
+    ].join("|");
+    if (key === this.renderedKey) return;
+    this.renderedKey = key;
     if (days.length === 0) {
       replaceChildren(
         this.content,
@@ -212,7 +231,6 @@ export class BeachView {
     }
 
     // Current conditions in the municipality, as a link to its forecast.
-    const hour = municipality ? currentHour(municipality, now) : null;
     const condition = sky(hour?.sky);
     const municipalityLink = beach
       ? h(

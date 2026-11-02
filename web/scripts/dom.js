@@ -183,3 +183,75 @@ export function infoButton(section, topic) {
     icon("info", "icon icon-small"),
   );
 }
+
+/** @type {WeakMap<object, number>} */
+const identities = new WeakMap();
+let lastIdentity = 0;
+
+/**
+ * A number that stays the same for the same object, to tell whether a
+ * view's data changed without comparing it field by field.
+ *
+ * @param {unknown} value
+ */
+export function identity(value) {
+  if (typeof value !== "object" || value === null) return 0;
+  let id = identities.get(value);
+  if (id === undefined) {
+    lastIdentity += 1;
+    id = lastIdentity;
+    identities.set(value, id);
+  }
+  return id;
+}
+
+/**
+ * Let a bottom sheet be pulled down by its header to close it, as its
+ * handle suggests. A short pull springs back.
+ *
+ * @param {HTMLDialogElement} dialog
+ */
+export function swipeToClose(dialog) {
+  /** @type {{id: number, y: number, at: number} | null} */
+  let drag = null;
+  let offset = 0;
+  const reset = () => {
+    dialog.style.removeProperty("transform");
+    dialog.style.removeProperty("transition");
+  };
+  dialog.addEventListener("pointerdown", (event) => {
+    const header = event.target instanceof Element ? event.target.closest(".sheet-header") : null;
+    // Buttons in the header keep their taps; only a phone-sized sheet moves.
+    const onButton = event.target instanceof Element && event.target.closest("button");
+    if (!header || onButton || matchMedia("(min-width: 48rem)").matches) return;
+    drag = { id: event.pointerId, y: event.clientY, at: performance.now() };
+    offset = 0;
+    dialog.style.transition = "none";
+    header.setPointerCapture(event.pointerId);
+  });
+  dialog.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    offset = Math.max(0, event.clientY - drag.y);
+    dialog.style.transform = `translateY(${offset}px)`;
+  });
+  const end = (/** @type {PointerEvent} */ event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const speed = offset / Math.max(performance.now() - drag.at, 1);
+    drag = null;
+    if (offset > Math.min(140, dialog.offsetHeight / 4) || (offset > 40 && speed > 0.6)) {
+      dialog.style.transition = "transform 0.18s ease-in";
+      dialog.style.transform = "translateY(100%)";
+      setTimeout(() => {
+        dialog.close();
+        reset();
+      }, 170);
+    } else {
+      dialog.style.transition = "transform 0.2s ease-out";
+      dialog.style.transform = "";
+      setTimeout(reset, 220);
+    }
+  };
+  dialog.addEventListener("pointerup", end);
+  dialog.addEventListener("pointercancel", end);
+  dialog.addEventListener("close", reset);
+}

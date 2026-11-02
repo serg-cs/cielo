@@ -10,37 +10,71 @@
   }
 }
 
-.guide-index ul {
-  display: flex;
-  flex-wrap: wrap;
+/* The index reads as a table of contents: a list of links in two
+   columns, each ending in an arrow that points down to its section. */
+.guide-index {
+  display: grid;
   gap: var(--space-2);
 }
 
-.guide-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-block-size: 2.25rem;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-muted);
-  color: var(--color-text);
-  font: inherit;
-  font-size: 0.875rem;
-  font-weight: 700;
-  cursor: pointer;
+.guide-index-title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.guide-chip .icon {
+.guide-index ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
+  column-gap: var(--space-4);
+}
+
+.guide-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: var(--touch-target);
+  border-block-end: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* Index icons are all one colour, the sun's included. */
+.guide-link > .icon:first-child {
+  --icon-sun: currentColor;
+  --icon-accent: currentColor;
   color: var(--color-muted);
+}
+
+.guide-link span {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.guide-link-arrow {
+  color: var(--color-accent);
+  transform: rotate(90deg);
+}
+
+@media (hover: hover) {
+  .guide-link:hover span {
+    color: var(--color-accent);
+  }
+}
+
+.guide-link:active span {
+  color: var(--color-accent);
 }
 
 .guide-section {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-tile);
   background: var(--color-surface-muted);
   line-height: 1.45;
   scroll-margin-block-start: var(--space-2);
@@ -130,19 +164,22 @@
   --mark: var(--mono-purple);
 }
 .guide-wind-1 {
-  --mark: color-mix(in srgb, var(--color-muted) 50%, transparent);
+  --mark: var(--severity-0);
 }
 .guide-wind-2 {
-  --mark: var(--color-muted);
+  --mark: var(--severity-1);
 }
 .guide-wind-3 {
-  --mark: var(--color-wind);
+  --mark: var(--severity-2);
 }
 .guide-wind-4 {
-  --mark: var(--color-warm);
+  --mark: var(--severity-3);
 }
 .guide-wind-5 {
-  --mark: var(--color-destructive);
+  --mark: var(--severity-4);
+}
+.guide-wind-6 {
+  --mark: var(--severity-5);
 }
 .guide-uv-1 {
   --mark: var(--uv-1);
@@ -238,10 +275,6 @@
   inset: calc((1.5rem - var(--touch-target)) / 2);
 }
 
-.info-button:hover {
-  color: var(--color-accent);
-}
-
 /* The list's bottom bar: source and freshness on the left, quiet, and the
    guide's button on the right. It stays on screen; the list fades out
    under it. */
@@ -262,7 +295,9 @@
   pointer-events: none;
 }
 
-.locations-bar > * {
+/* Only its link and button take taps; the rows under it stay tappable. */
+.locations-bar a,
+.locations-bar button {
   pointer-events: auto;
 }
 
@@ -289,10 +324,6 @@
   box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 35%);
   color: var(--color-accent);
   cursor: pointer;
-}
-
-.guide-button:hover {
-  background: var(--color-surface-muted);
 }
 
 /* Room under the list so the bar never covers the last row. */

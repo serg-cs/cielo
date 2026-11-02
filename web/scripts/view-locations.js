@@ -36,6 +36,10 @@ export class LocationsView {
     this.onPrefetch = onPrefetch;
     this.editing = false;
     this.query = "";
+    /** What the list was last built from. */
+    this.renderedKey = "";
+    /** @type {string | null | undefined} */
+    this.renderedUpdated = undefined;
     /** @type {{places: Map<string, Place>, beaches: Map<string, Beach>, saved: string[], summaries: Map<string, SavedSummary>, status: string | null, updated: string | null}} */
     this.state = {
       places: new Map(),
@@ -53,7 +57,7 @@ export class LocationsView {
       autocomplete: "off",
       spellcheck: "false",
       enterkeyhint: "search",
-      placeholder: "Buscar municipio o playa",
+      placeholder: "Municipio o playa",
       "aria-describedby": "search-status",
       oninput: () => {
         this.query = this.input.value;
@@ -139,7 +143,34 @@ export class LocationsView {
    */
   update(state) {
     Object.assign(this.state, state);
+    this.renderSource();
+    // The list is only rebuilt when a row would change: rebuilding replaces
+    // the row under the finger and loses the tap.
+    if (this.listKey() === this.renderedKey) return;
     preserveFocus(this.list, () => this.renderList());
+  }
+
+  /** Everything the list shows that comes from outside the view. */
+  listKey() {
+    const { saved, summaries, status, places, beaches } = this.state;
+    return JSON.stringify([saved, [...summaries], status, places.size, beaches.size]);
+  }
+
+  /** Source and freshness, in the bottom bar. */
+  renderSource() {
+    const { updated } = this.state;
+    if (this.source.childElementCount > 0 && updated === this.renderedUpdated) return;
+    this.renderedUpdated = updated;
+    replaceChildren(
+      this.source,
+      h(
+        "p",
+        null,
+        "Previsiones de ",
+        h("a", { href: "https://www.aemet.es/", rel: "noopener", target: "_blank" }, "AEMET"),
+      ),
+      updated ? h("p", null, updated) : null,
+    );
   }
 
   toggleEditing() {
@@ -158,7 +189,8 @@ export class LocationsView {
       const beach = beaches.get(id);
       return {
         name: beach?.name ?? "Playa",
-        where: beach ? `Playa · ${beach.municipality}` : "Playa",
+        // The parasol before the name already says it is a beach.
+        where: beach ? beach.municipality : "",
         beach: true,
       };
     }
@@ -171,22 +203,13 @@ export class LocationsView {
   }
 
   renderList() {
-    const { saved, summaries, status, updated } = this.state;
+    const { saved, summaries, status } = this.state;
     const searching = this.query.trim().length > 0;
     this.clearButton.hidden = !searching;
     this.editButton.hidden = saved.length === 0 || searching;
     this.editButton.textContent = this.editing ? "Hecho" : "Editar";
     this.editButton.setAttribute("aria-pressed", String(this.editing));
-    replaceChildren(
-      this.source,
-      h(
-        "p",
-        null,
-        "Previsiones de ",
-        h("a", { href: "https://www.aemet.es/", rel: "noopener", target: "_blank" }, "AEMET"),
-      ),
-      updated ? h("p", null, updated) : null,
-    );
+    this.renderedKey = this.listKey();
 
     if (searching) {
       this.renderResults();
@@ -211,6 +234,19 @@ export class LocationsView {
         null,
         h("span.place-name", null, beach ? icon("parasol", "icon icon-tiny place-kind") : null, name),
         where ? h("span.place-where", null, where) : null,
+        // The warning is said in words under the name, like in the day list.
+        warning && !this.editing
+          ? h(
+              "span.place-warning",
+              { class: `place-warning level-${summary?.warning}` },
+              h(
+                "span.day-warning",
+                { class: `day-warning level-${summary?.warning}` },
+                icon("triangle-alert", "icon icon-tiny"),
+              ),
+              `Aviso ${warning.label.toLowerCase()}`,
+            )
+          : null,
       );
       if (this.editing) {
         return h(
@@ -281,16 +317,6 @@ export class LocationsView {
           h(
             "span.place-side",
             null,
-            warning
-              ? h(
-                  "span.warning-badge",
-                  {
-                    class: `warning-badge level-${summary?.warning}`,
-                    title: `Aviso ${warning.label.toLowerCase()}`,
-                  },
-                  icon("triangle-alert", "icon icon-small"),
-                )
-              : null,
             summary?.icon ? icon(summary.icon, "icon icon-condition place-icon") : null,
             // Beaches show their water temperature in the same blue pill as
             // the beach rows of a municipality.
@@ -300,6 +326,7 @@ export class LocationsView {
                 : null
               : h("span.place-reading", null, h("span.place-temperature", null, degrees(summary?.temp))),
           ),
+          icon("chevron-right", "icon icon-small link-chevron place-chevron"),
         ),
       );
     });

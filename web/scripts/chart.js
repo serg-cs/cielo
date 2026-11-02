@@ -7,12 +7,18 @@
 
 import { h, icon, infoButton, svg, windArrow } from "./dom.js";
 
+let chartCount = 0;
+
 /**
  * @typedef {object} Series
  * @property {Array<number | null>} values One value per point.
  * @property {"line" | "bars" | "step"} kind `step` holds each value for its hour.
  * @property {string} className Colour and stroke style.
  * @property {[number, number]} [range] Own scale (bottom, top), such as 0-100 %.
+ * @property {Array<[number, string]>} [colors] Colour stops by value (value,
+ *   CSS colour): the line takes the colour of the value it passes through.
+ * @property {boolean} [hard] Colour stops are hard edges (levels), not a blend.
+ * @property {boolean} [area] Fill below the line or step.
  */
 
 /**
@@ -35,6 +41,7 @@ import { h, icon, infoButton, svg, windArrow } from "./dom.js";
 /**
  * @typedef {object} ChartOptions
  * @property {string} title
+ * @property {string} [unit] Unit of the scale, shown after the title.
  * @property {string} iconName
  * @property {string} summary Spoken description of the whole chart.
  * @property {number[]} hours Local hour (0-23) of each point.
@@ -44,6 +51,9 @@ import { h, icon, infoButton, svg, windArrow } from "./dom.js";
  * @property {(value: number) => string} label Axis label for a value.
  * @property {Array<[string, string]>} [key] Series class and name.
  * @property {string} [guide] Guide section the title's ⓘ opens.
+ * @property {number | null} [now] Current hour (0-24, fractional) on today's charts.
+ * @property {Array<{index: number, degrees: number | null, level: number | null}>} [arrows]
+ *   Wind directions shown under the plot.
  */
 
 /**
@@ -121,31 +131,102 @@ export function chartRange(values, { minimumSpan = 4, floor, ceiling, step = 1 }
 }
 
 /**
- * One chart.
+ * Stops of an SVG gradient that colours by value, on a vertical axis.
+ *
+ * @param {Array<[number, string]>} colors Value and colour, ascending.
+ * @param {(value: number) => number} y Value to drawing height.
+ * @param {string} id
+ * @param {boolean} hard Hard edges between colours (levels).
+ */
+function valueGradient(colors, y, id, hard) {
+  const top = colors[colors.length - 1][0];
+  const bottom = colors[0][0];
+  const offset = (/** @type {number} */ value) => ((top - value) / (top - bottom || 1)).toFixed(4);
+  // From the top (highest value) down. With hard edges each colour covers
+  // from its value up to the next one.
+  const stops = [svg("stop", { offset: 0, style: { "stop-color": colors[colors.length - 1][1] } })];
+  for (let index = colors.length - 1; index >= 1; index -= 1) {
+    const [value, color] = colors[index];
+    if (hard) {
+      stops.push(svg("stop", { offset: offset(value), style: { "stop-color": color } }));
+      stops.push(svg("stop", { offset: offset(value), style: { "stop-color": colors[index - 1][1] } }));
+    } else {
+      stops.push(svg("stop", { offset: offset(value), style: { "stop-color": color } }));
+    }
+  }
+  stops.push(svg("stop", { offset: 1, style: { "stop-color": colors[0][1] } }));
+  return svg(
+    "linearGradient",
+    { id, gradientUnits: "userSpaceOnUse", x1: 0, x2: 0, y1: y(top), y2: y(bottom) },
+    ...stops,
+  );
+}
+
+/**
+ * One chart: a plot with its scale on the right, the hours below and a
+ * pill with the values of the hour under the finger.
  *
  * @param {ChartOptions} options
  */
-export function chart({ title, iconName, summary, hours, series, range, describe, label, key = [], guide }) {
+export function chart({
+  title,
+  unit,
+  iconName,
+  summary,
+  hours,
+  series,
+  range,
+  describe,
+  label,
+  key = [],
+  guide,
+  now = null,
+  arrows = [],
+}) {
+  chartCount += 1;
+  const uid = `chart-${chartCount}`;
   const percentX = (/** @type {number} */ index) => ((hours[index] + 0.5) / 24) * 100;
   const scale =
     (/** @type {[number, number]} */ [low, high]) =>
     (/** @type {number} */ value) =>
       100 - ((value - low) / (high - low || 1)) * 100;
 
+  const defs = svg("defs");
   const plot = svg("svg", {
     class: "chart-plot",
     viewBox: "0 0 24 100",
     preserveAspectRatio: "none",
     "aria-hidden": "true",
   });
+  plot.append(defs);
   for (const y of [0, 50, 100]) {
     plot.append(svg("line", { class: "chart-grid", x1: 0, x2: 24, y1: y, y2: y }));
+  }
+  for (const x of [6, 12, 18]) {
+    plot.append(svg("line", { class: "chart-grid vertical", x1: x, x2: x, y1: 0, y2: 100 }));
   }
 
   /** Drawn height (%) of each line point, for the dots shown with the pill. @type {Array<{className: string, y: Array<number | null>}>} */
   const lines = [];
-  for (const item of series) {
+  series.forEach((item, seriesIndex) => {
     const y = scale(item.range ?? range);
+    let stroke = null;
+    if (item.colors) {
+      const id = `${uid}-colors-${seriesIndex}`;
+      defs.append(valueGradient(item.colors, y, id, item.hard ?? false));
+      stroke = `url(#${id})`;
+    }
+    const fadeId = `${uid}-fade-${seriesIndex}`;
+    if (item.area) {
+      defs.append(
+        svg(
+          "linearGradient",
+          { id: fadeId, class: item.className, x1: 0, x2: 0, y1: 0, y2: 1 },
+          svg("stop", { offset: 0, class: "fade-start" }),
+          svg("stop", { offset: 1, class: "fade-end" }),
+        ),
+      );
+    }
     if (item.kind === "bars") {
       item.values.forEach((value, index) => {
         if (!value) return;
@@ -153,47 +234,102 @@ export function chart({ title, iconName, summary, hours, series, range, describe
         plot.append(
           svg("rect", {
             class: `chart-bar ${item.className}`,
-            x: hours[index] + 0.18,
-            width: 0.64,
+            x: hours[index] + 0.14,
+            width: 0.72,
             y: top,
             height: 100 - top,
           }),
         );
       });
-    } else if (item.kind === "step") {
+      return;
+    }
+    if (item.kind === "step") {
       let path = "";
+      let area = "";
       item.values.forEach((value, index) => {
         if (value === null) return;
         const joined = index > 0 && item.values[index - 1] !== null && hours[index - 1] === hours[index] - 1;
         path += `${joined ? "V" : `M${hours[index]},`}${y(value)} H${hours[index] + 1} `;
+        area += `M${hours[index]},100 V${y(value)} H${hours[index] + 1} V100 Z `;
       });
-      if (path)
-        plot.append(
-          svg("path", {
-            class: `chart-line ${item.className}`,
-            d: path.trim(),
-          }),
+      if (item.area && area) {
+        plot.append(svg("path", { class: `chart-area-fill ${item.className}`, d: area, fill: `url(#${fadeId})` }));
+      }
+      if (path) plot.append(svg("path", { class: `chart-line ${item.className}`, d: path.trim() }));
+      return;
+    }
+    // Softening would move a value across a level edge and give the line
+    // another colour than the hour's own, so lines coloured by level keep
+    // their real values.
+    const drawn = (item.hard ? item.values : softened(item.values)).map((value) =>
+      value === null ? null : y(value),
+    );
+    const points = drawn.map((value, index) =>
+      value === null ? null : /** @type {[number, number]} */ ([hours[index] + 0.5, value]),
+    );
+    const line = smoothPath(points);
+    // The area under each unbroken run of points (gaps leave no area).
+    /** @type {Array<Array<[number, number]>>} */
+    const runs = [[]];
+    for (const point of points) {
+      if (point) runs[runs.length - 1].push(point);
+      else if (runs[runs.length - 1].length) runs.push([]);
+    }
+    const area = runs
+      .filter((run) => run.length > 1)
+      .map((run) => `${smoothPath(run)} L${run[run.length - 1][0]},100 L${run[0][0]},100 Z`)
+      .join(" ");
+    if (item.area && area) {
+      // A coloured area fades out downwards through a mask.
+      const maskId = `${uid}-mask-${seriesIndex}`;
+      if (stroke) {
+        defs.append(
+          svg(
+            "linearGradient",
+            { id: `${maskId}-fade`, x1: 0, x2: 0, y1: 0, y2: 1 },
+            svg("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": "0.5" }),
+            svg("stop", { offset: 1, "stop-color": "#fff", "stop-opacity": "0" }),
+          ),
+          svg(
+            "mask",
+            { id: maskId, maskUnits: "userSpaceOnUse", x: 0, y: 0, width: 24, height: 100 },
+            svg("rect", { x: 0, y: 0, width: 24, height: 100, fill: `url(#${maskId}-fade)` }),
+          ),
         );
-    } else {
-      const drawn = softened(item.values).map((value) => (value === null ? null : y(value)));
-      const points = drawn.map((value, index) =>
-        value === null ? null : /** @type {[number, number]} */ ([hours[index] + 0.5, value]),
-      );
+      }
       plot.append(
         svg("path", {
-          class: `chart-line ${item.className}`,
-          d: smoothPath(points),
+          class: `chart-area-fill ${item.className}`,
+          d: area,
+          fill: stroke ?? `url(#${fadeId})`,
+          mask: stroke ? `url(#${maskId})` : null,
         }),
       );
-      lines.push({ className: item.className, y: drawn });
     }
-  }
+    plot.append(
+      svg("path", {
+        class: `chart-line ${item.className}`,
+        d: line,
+        style: stroke ? { stroke } : null,
+      }),
+    );
+    lines.push({ className: item.className, y: drawn });
+  });
 
   const cursor = h("span.chart-cursor", { hidden: true });
   const dots = lines.map((line) => h("span.chart-dot", { class: `chart-dot ${line.className}`, hidden: true }));
   const pill = h("div.chart-pill", { hidden: true, "aria-live": "polite" });
   /** @type {number | null} */
   let selected = null;
+
+  const nowLine =
+    now === null
+      ? null
+      : h(
+          "span.chart-now",
+          { style: { "--x": `${(now / 24) * 100}%` }, "aria-hidden": "true" },
+          h("span.chart-now-label", null, "Ahora"),
+        );
 
   /** @param {PointerEvent} event */
   const pointAt = (event) => {
@@ -211,6 +347,7 @@ export function chart({ title, iconName, summary, hours, series, range, describe
     selected = index;
     cursor.hidden = index === null;
     pill.hidden = index === null;
+    area.classList.toggle("selecting", index !== null);
     dots.forEach((dot, line) => {
       dot.hidden = index === null || lines[line].y[index] === null;
     });
@@ -274,6 +411,7 @@ export function chart({ title, iconName, summary, hours, series, range, describe
       onblur: () => select(null),
     },
     plot,
+    nowLine,
     cursor,
     dots,
     pill,
@@ -290,14 +428,32 @@ export function chart({ title, iconName, summary, hours, series, range, describe
       null,
       icon(iconName, "icon icon-small"),
       title,
+      unit ? h("small.chart-unit", null, unit) : null,
       guide ? infoButton(guide, title.toLowerCase()) : null,
     ),
     area,
+    arrows.length
+      ? h(
+          "div.chart-arrows",
+          { "aria-hidden": "true" },
+          arrows.map((arrow, arrowIndex) =>
+            h(
+              "span",
+              {
+                // Every other one goes when the chart is narrow.
+                class: `wind-level-${arrow.level ?? 0}${arrowIndex % 2 ? " minor" : ""}`,
+                style: { "--x": `${percentX(arrow.index)}%` },
+              },
+              arrow.degrees === null ? h("span.chart-calm") : windArrow(arrow.degrees, "icon icon-small"),
+            ),
+          ),
+        )
+      : null,
     h(
       "div.chart-hours",
       { "aria-hidden": "true" },
       [0, 6, 12, 18, 24].map((hour) =>
-        h("span", { style: { "--x": `${(hour / 24) * 100}%` } }, hour === 24 ? "24\u00a0h" : String(hour)),
+        h("span", { style: { "--x": `${(hour / 24) * 100}%` } }, String(hour)),
       ),
     ),
     key.length

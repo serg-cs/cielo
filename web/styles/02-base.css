@@ -112,8 +112,7 @@ table {
 .beach-levels li,
 .sheet-pop,
 .warning-icon,
-.warning-banner-icon,
-.warning-badge {
+.warning-banner-icon {
   --icon-sun: currentColor;
   --icon-accent: currentColor;
 }
@@ -175,10 +174,6 @@ table {
   cursor: pointer;
 }
 
-.icon-button:hover {
-  background: var(--color-surface-muted);
-}
-
 .icon-button:disabled {
   opacity: 0.3;
   cursor: default;
@@ -204,11 +199,6 @@ table {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-}
-
-.text-button:hover,
-.save-button:hover {
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /* Cards */
@@ -291,56 +281,78 @@ table {
 
 /* Segmented toggle (radio buttons) */
 .segmented {
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  /* Each segment fits its word; spare room is shared out evenly. */
+  grid-auto-columns: minmax(max-content, 1fr);
   padding: 0.1875rem;
   border-radius: var(--radius-pill);
   background: var(--color-surface-muted);
 }
 
+/* A toggle that takes its row: equal segments across the whole width. */
+.segmented-fill {
+  display: grid;
+  flex: 1 1 19rem;
+  max-inline-size: 26rem;
+}
+
 .segment {
   position: relative;
   display: grid;
+  min-inline-size: 0;
 }
 
 .segment input {
   position: absolute;
   inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
   margin: 0;
   opacity: 0;
   cursor: pointer;
+  z-index: 1;
 }
 
 .segment > span {
   display: grid;
   place-items: center;
-  min-block-size: 2rem;
-  padding: 0 var(--space-3);
+  min-block-size: 2.25rem;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
   color: var(--color-muted);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 700;
   white-space: nowrap;
 }
 
-/* With large text the toggle fills its own row and, if the words still do
-   not fit, wraps onto more rows. */
-@container (max-width: 24rem) {
-  .segmented {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.5rem), 1fr));
-    inline-size: 100%;
-    border-radius: var(--radius-control);
+.segment-short {
+  display: none;
+}
+
+/* With large text the long names do not fit three in a row: short ones. */
+@container (max-width: 19rem) {
+  .segment-long {
+    display: none;
   }
 
+  .segment-short {
+    display: inline;
+  }
+}
+
+/* Very large text: tighter segments, so all three still fit. */
+@container (max-width: 14rem) {
   .segment > span {
-    padding-inline: var(--space-2);
+    padding-inline: var(--space-1);
+    font-size: 0.8125rem;
   }
 }
 
 .segment input:checked + span {
-  background: var(--color-surface);
+  background: var(--color-surface-strong);
   color: var(--color-text);
-  box-shadow: 0 0.0625rem 0.1875rem rgb(0 0 0 / 14%);
+  box-shadow: 0 0.0625rem 0.25rem rgb(0 0 0 / 25%);
 }
 
 .segment input:focus-visible + span {
@@ -348,25 +360,24 @@ table {
   outline-offset: 0.1rem;
 }
 
-/* Wind arrows point where the wind blows to. */
-.wind-arrow {
-  display: inline-grid;
-  place-items: center;
-  transform: rotate(var(--direction, 0deg));
+/* Wind takes the colour of its strength (see the severity scale). */
+.wind-level-0 {
+  --wind-color: var(--severity-0);
 }
-
 .wind-level-1 {
-  --wind-color: var(--color-muted);
+  --wind-color: var(--severity-1);
 }
 .wind-level-2 {
-  --wind-color: var(--color-wind);
+  --wind-color: var(--severity-2);
 }
 .wind-level-3 {
-  --wind-color: var(--color-warm);
+  --wind-color: var(--severity-3);
 }
-.wind-level-4,
+.wind-level-4 {
+  --wind-color: var(--severity-4);
+}
 .wind-level-5 {
-  --wind-color: var(--color-destructive);
+  --wind-color: var(--severity-5);
 }
 
 /* Links to other places */
@@ -393,11 +404,6 @@ table {
 .link-card {
   padding-inline: var(--space-4);
   border-radius: var(--radius-card);
-}
-
-a.link-card:hover,
-.link-row:hover .link-name {
-  color: var(--color-accent);
 }
 
 /* The name keeps the room it needs; with large text the rest wraps below. */
@@ -461,15 +467,111 @@ a.link-card:hover,
   --on-level: var(--color-on-warning-red);
 }
 
+/* Tappable things. Rows and cards that open something end in a chevron;
+   actions are accent pills or round icon buttons. All of them answer to
+   the pointer the same way: a tint on hover (only where hovering exists,
+   so a first tap on a phone is never spent on it) and a pressed state. */
+.place-row,
+.day-row,
+.link-row,
+.link-card,
+.warning-banner,
+.chip,
+.text-button,
+.save-button,
+.icon-button,
+.guide-button,
+.segment > span {
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+@media (hover: hover) {
+  a.place-row:hover,
+  .day-row:hover,
+  .link-row:hover,
+  a.link-card:hover,
+  .chip:hover {
+    background-color: var(--color-surface-hover);
+  }
+
+  .warning-banner:hover {
+    filter: brightness(1.05);
+  }
+
+  .icon-button:hover,
+  .guide-button:hover {
+    background-color: var(--color-surface-muted);
+  }
+
+  .text-button:hover,
+  .save-button:hover {
+    background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  }
+
+  .info-button:hover {
+    color: var(--color-accent);
+  }
+
+  .segment:hover input:not(:checked) + span {
+    color: var(--color-text);
+  }
+}
+
+a.place-row:active,
+.day-row:active,
+.link-row:active,
+a.link-card:active,
+.chip:active {
+  background-color: var(--color-surface-pressed);
+}
+
+.warning-banner:active {
+  filter: brightness(0.92);
+}
+
+.icon-button:active,
+.guide-button:active {
+  background-color: var(--color-surface-strong);
+}
+
+.text-button:active,
+.save-button:active {
+  background-color: color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+
+.info-button:active {
+  color: var(--color-accent);
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  a.place-row:active,
+  a.link-card:active,
+  .warning-banner:active,
+  .chip:active,
+  .text-button:active,
+  .save-button:active,
+  .guide-button:active {
+    transform: scale(0.985);
+  }
+
   .place-row,
   .day-row,
   .link-row,
+  .link-card,
   .warning-banner,
+  .chip,
+  .text-button,
+  .save-button,
+  .icon-button,
+  .guide-button,
+  .segment > span,
   .toast {
     transition:
       background-color 0.15s ease,
+      color 0.15s ease,
+      filter 0.15s ease,
       opacity 0.2s ease,
-      transform 0.2s ease;
+      transform 0.15s ease;
   }
 }

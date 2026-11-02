@@ -202,18 +202,24 @@ export function fireDanger(level) {
 }
 
 /**
- * Wind strength band (0-5) for colouring speeds.
+ * Wind strength on the severity scale, for colouring: 0 calm, 1 flojo,
+ * 2 moderado, 3 fuerte, 4 muy fuerte, 5 huracanado. `null` without data.
  *
  * @param {number | null | undefined} speed km/h
+ * @returns {number | null}
  */
 export function windLevel(speed) {
-  if (speed === null || speed === undefined) return 0;
+  if (speed === null || speed === undefined) return null;
+  if (speed < 6) return 0;
   if (speed <= 20) return 1;
   if (speed <= 40) return 2;
   if (speed <= 70) return 3;
   if (speed <= 120) return 4;
   return 5;
 }
+
+/** Speeds (km/h) where the wind changes level, for colouring charts. */
+export const WIND_LEVEL_LIMITS = [6, 21, 41, 71, 121];
 
 /** @type {Record<string, {label: string, meaning: string, rank: number}>} */
 export const WARNING_LEVELS = {

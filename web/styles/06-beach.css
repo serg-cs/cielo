@@ -11,7 +11,7 @@
   display: grid;
   gap: 0.125rem;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-tile);
   background: var(--color-surface-muted);
 }
 
@@ -76,19 +76,25 @@
   --uv-color: var(--uv-5);
 }
 
+/* Morning and afternoon side by side, their rows lined up (a longer sky
+   label on one side does not push its wind and waves out of line). */
 .beach-halves {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
-  gap: var(--space-2);
+  grid-auto-rows: auto;
+  gap: 0 var(--space-2);
 }
 
 .beach-half {
   display: grid;
+  grid-row: span 4;
+  grid-template-rows: subgrid;
   justify-items: center;
   align-content: start;
   gap: var(--space-1);
+  margin-block-end: var(--space-2);
   padding: var(--space-3);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-tile);
   border: 1px solid var(--color-border);
   text-align: center;
 }

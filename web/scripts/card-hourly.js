@@ -14,18 +14,21 @@ const MODES = [
   {
     value: "temp",
     label: "Temperatura",
+    short: "Temp.",
     spoken: "Temperatura",
     caption: null,
   },
   {
     value: "rain",
     label: "Lluvia",
+    short: "Lluvia",
     spoken: "Lluvia",
     caption: "Probabilidad de lluvia en cada tramo de 6\u00a0horas y, debajo, litros por m² previstos en esa hora.",
   },
   {
     value: "wind",
     label: "Viento",
+    short: "Viento",
     spoken: "Viento",
     caption: "Viento medio en km/h y, debajo, la racha máxima prevista.",
   },
@@ -88,7 +91,7 @@ function readings(hour, level) {
     ),
     h(
       "span.reading.reading-wind",
-      { class: `reading reading-wind wind-level-${windLevel(hour.wind)}` },
+      { class: `reading reading-wind wind-level-${windLevel(hour.wind) ?? 0}` },
       direction.degrees === null || (hour.wind ?? 0) < 6
         ? h("span.wind-calm", null, hour.wind === null ? "" : hour.wind < 6 ? "Calma" : direction.short || "")
         : windArrow(direction.degrees, "icon"),
@@ -137,7 +140,7 @@ export function hourlyCard({ hours, timeZone, now, mode, onModeChange, scrollLef
     onModeChange(option.value);
   };
   const toggle = h(
-    "div.segmented",
+    "div.segmented.segmented-fill",
     { role: "radiogroup", "aria-label": "Qué mostrar por horas" },
     MODES.map((option) =>
       h(
@@ -151,7 +154,12 @@ export function hourlyCard({ hours, timeZone, now, mode, onModeChange, scrollLef
           "aria-label": option.spoken,
           onchange: () => select(option),
         }),
-        h("span", { "aria-hidden": "true" }, option.label),
+        h(
+          "span",
+          { "aria-hidden": "true" },
+          h("span.segment-long", null, option.label),
+          h("span.segment-short", null, option.short),
+        ),
       ),
     ),
   );
@@ -245,8 +253,15 @@ export function hourlyCard({ hours, timeZone, now, mode, onModeChange, scrollLef
     h("div.hours-track", { style: { "--hours": hours.length } }, curve, h("ol.hours", { role: "list" }, items)),
   );
   scrollerElement = scroller;
+  // The edges fade where there are more hours to scroll to.
+  const markEnd = () => {
+    scroller.classList.toggle("scrolled", scroller.scrollLeft > 4);
+    scroller.classList.toggle("at-end", scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4);
+  };
+  scroller.addEventListener("scroll", markEnd, { passive: true });
   requestAnimationFrame(() => {
     scroller.scrollLeft = scrollLeft;
+    markEnd();
   });
 
   card = h(

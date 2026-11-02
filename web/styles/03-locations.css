@@ -70,9 +70,13 @@
   color: var(--color-muted);
 }
 
+/* Typing in the field is its normal state: a quiet accent border, not
+   the bright keyboard-focus ring. */
+.search-input:focus,
 .search-input:focus-visible {
-  outline-offset: 0;
-  border-radius: var(--radius-pill);
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  box-shadow: 0 0 0 0.1875rem var(--color-accent-soft);
 }
 
 .search-clear {
@@ -106,10 +110,6 @@
   text-decoration: none;
 }
 
-a.place-row:hover {
-  background: color-mix(in srgb, var(--color-surface) 70%, var(--color-surface-muted));
-}
-
 .place-row.result {
   min-block-size: 3.5rem;
   padding-block: var(--space-2);
@@ -118,7 +118,7 @@ a.place-row:hover {
 /* The name takes the line it needs; with large text the reading wraps below. */
 .place-text {
   display: grid;
-  flex: 1 1 10rem;
+  flex: 1 1 6.5rem;
   min-inline-size: 0;
 }
 
@@ -127,6 +127,37 @@ a.place-row:hover {
   align-items: center;
   gap: var(--space-3);
   margin-inline-start: auto;
+}
+
+.place-chevron {
+  margin-inline: calc(var(--space-1) * -1) calc(var(--space-2) * -1);
+}
+
+/* Large text: the reading goes on its own line under the name, from the
+   left, and the chevron stays at the right of the whole row. */
+@container (max-width: 19rem) {
+  a.place-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "text chevron"
+      "side chevron";
+    row-gap: var(--space-2);
+  }
+
+  a.place-row .place-text {
+    grid-area: text;
+  }
+
+  a.place-row .place-side {
+    grid-area: side;
+    justify-self: start;
+    margin-inline-start: 0;
+  }
+
+  a.place-row .place-chevron {
+    grid-area: chevron;
+  }
 }
 
 .place-name {
@@ -182,15 +213,14 @@ a.place-row:hover {
   color: var(--color-accent);
 }
 
-.warning-badge {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 1.75em;
-  block-size: 1.75em;
-  flex: none;
-  border-radius: var(--radius-pill);
-  background: var(--level);
-  color: var(--on-level);
+.place-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-start: 0.125rem;
+  color: var(--level);
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .place-row.editing {
@@ -201,9 +231,23 @@ a.place-row:hover {
 
 .edit-actions {
   display: inline-flex;
+  gap: var(--space-1);
   margin-inline-start: auto;
   flex-wrap: wrap;
   justify-content: end;
+}
+
+/* Visible round buttons, so they read as controls. */
+.edit-actions .icon-button {
+  background: var(--color-surface-muted);
+}
+
+.edit-actions .icon-button.destructive {
+  background: color-mix(in srgb, var(--color-destructive) 14%, transparent);
+}
+
+.edit-actions .icon-button:disabled {
+  background: transparent;
 }
 
 /* First launch */
@@ -260,6 +304,3 @@ a.place-row:hover {
   color: var(--color-accent);
 }
 
-.chip:hover {
-  background: var(--color-surface-muted);
-}
