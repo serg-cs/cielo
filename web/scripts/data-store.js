@@ -42,13 +42,6 @@ export class DataStore extends EventTarget {
    * @param {{maxAge?: number, force?: boolean}} [options]
    * @returns {Promise<unknown>} The best available document, or `null`.
    */
-  /** When any document was last confirmed from the network (ms), or 0. */
-  lastChecked() {
-    let latest = 0;
-    for (const entry of this.entries.values()) latest = Math.max(latest, entry.fetchedAt);
-    return latest;
-  }
-
   async load(path, { maxAge = 10 * 60 * 1000, force = false } = {}) {
     if (!this.entries.has(path)) {
       this.update(path, { status: "loading" });

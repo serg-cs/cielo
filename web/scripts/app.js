@@ -5,7 +5,7 @@
 import { beachSky, sky } from "./codes.js";
 import { DataStore } from "./data-store.js";
 import { replaceChildren, swipeToClose } from "./dom.js";
-import { checkedAt, localDate, localHour } from "./format.js";
+import { issuedAt, localDate, localHour } from "./format.js";
 import { currentHour, decodeForecast } from "./forecast.js";
 import {
   PLACES_PATH,
@@ -497,7 +497,7 @@ export class App {
           "esta playa",
         ),
         offline,
-        checked: entry.fetchedAt,
+        issued: issuedTime(forecast?.issued),
         now,
       });
       document.title = `${beach?.name ?? "Playa"} · Cielo`;
@@ -527,7 +527,7 @@ export class App {
         "este municipio",
       ),
       offline,
-      checked: this.store.peek(forecastPath(id)).fetchedAt,
+      issued: issuedTime(forecast?.issued),
       now,
     });
     document.title = place ? `${place.name} · Cielo` : "Cielo";
@@ -595,15 +595,19 @@ export class App {
             : "No se pudo cargar la lista de lugares. Inténtalo de nuevo más tarde."
           : "Cargando lugares…";
     }
-    // The last time the data was checked, even if AEMET had nothing new.
-    const checked = this.store.lastChecked();
+    // When AEMET issued the newest forecast among the saved places.
+    let issued = 0;
+    for (const id of this.saved) {
+      const forecast = isBeachId(id) ? this.beachForecast(id) : this.forecast(id);
+      issued = Math.max(issued, issuedTime(forecast?.issued));
+    }
     this.locations.update({
       places: this.places,
       beaches: this.beaches,
       saved: this.saved,
       summaries,
       status,
-      updated: checked ? `${checkedAt(checked, now)}${offline ? " · sin conexión" : ""}` : null,
+      updated: issued ? `${issuedAt(issued, now)}${offline ? " · sin conexión" : ""}` : null,
     });
   }
 
@@ -679,4 +683,15 @@ function screenOf(route) {
 function historyDepth() {
   const depth = /** @type {{depth?: unknown} | null} */ (history.state)?.depth;
   return typeof depth === "number" && depth > 0 ? depth : 0;
+}
+
+/**
+ * AEMET's issue time in ms, or 0 when unknown. Municipality forecasts carry
+ * a `Date`, beach forecasts the raw string.
+ *
+ * @param {Date | string | null | undefined} issued
+ */
+function issuedTime(issued) {
+  const time = issued instanceof Date ? issued.getTime() : issued ? Date.parse(issued) : 0;
+  return Number.isFinite(time) ? time : 0;
 }

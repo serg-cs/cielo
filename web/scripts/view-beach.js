@@ -24,7 +24,7 @@ import { RENDER_EVERY, warningsKey } from "./view-forecast.js";
  * @property {boolean} saved
  * @property {string | null} status
  * @property {boolean} offline
- * @property {number} checked When the data was last confirmed from the network (ms), or 0.
+ * @property {number} issued When AEMET issued this forecast (ms), or 0 when unknown.
  * @property {number} now
  */
 
@@ -181,7 +181,7 @@ export class BeachView {
   }
 
   /** @param {BeachState} state */
-  render({ id, beach, forecast, municipality, warnings, saved, status, offline, checked, now }) {
+  render({ id, beach, forecast, municipality, warnings, saved, status, offline, issued, now }) {
     this.header.update({
       title: beach?.name ?? forecast?.name ?? "Playa",
       subtitle: beach
@@ -189,7 +189,7 @@ export class BeachView {
         : "Playa",
       saved,
       known: beach !== null,
-      stale: forecast ? staleNote(checked, now) : null,
+      stale: forecast ? staleNote(issued, now) : null,
     });
     const timeZone = beach?.timeZone ?? "Europe/Madrid";
     const today = localDate(now, timeZone);

@@ -154,14 +154,14 @@ export function number(value, digits = 0) {
 }
 
 /**
- * When the data was last checked, in the device's time: `Actualizado a las
+ * When AEMET issued the data, in the device's time: `Actualizado a las
  * 16:58`, or with the date when it was not today.
  *
  * @param {number} time
  * @param {number} now
  * @param {string} [timeZone] Defaults to the device's.
  */
-export function checkedAt(time, now, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+export function issuedAt(time, now, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
   const clock = clockTime(time, timeZone);
   if (localDate(time, timeZone) === localDate(now, timeZone)) return `Actualizado a las ${clock}`;
   return `Actualizado el ${dayMonth(localDate(time, timeZone), "short")}, ${clock}`;

@@ -182,16 +182,14 @@ export function nowCard({ hour, today, summary, status }) {
 const STALE_AFTER = 6 * 3600 * 1000;
 
 /**
- * Note when the data was last checked more than 6 hours ago, or `null`. It
- * goes by the last check, not AEMET's issue time: data checked a minute ago
- * is the latest there is, however old AEMET's forecast.
+ * Note when AEMET issued the forecast more than 6 hours ago, or `null`.
  *
- * @param {number} checked When the data was last confirmed from the network (ms), or 0.
+ * @param {number} issued When AEMET issued the forecast (ms), or 0 when unknown.
  * @param {number} now
  */
-export function staleNote(checked, now) {
-  if (!checked || now - checked < STALE_AFTER) return null;
-  return "Datos sin actualizar desde hace más de 6\u00a0horas";
+export function staleNote(issued, now) {
+  if (!issued || now - issued < STALE_AFTER) return null;
+  return "Previsión elaborada hace más de 6\u00a0horas";
 }
 
 /**

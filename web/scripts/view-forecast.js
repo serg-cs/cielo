@@ -36,7 +36,7 @@ export function warningsKey(warnings) {
  * @property {boolean} saved
  * @property {string | null} status Message when the forecast is missing.
  * @property {boolean} offline
- * @property {number} checked When the data was last confirmed from the network (ms), or 0.
+ * @property {number} issued When AEMET issued this forecast (ms), or 0 when unknown.
  * @property {number} now
  */
 
@@ -81,7 +81,7 @@ export class ForecastView {
   /** @param {ForecastState} state */
   render(state) {
     this.state = state;
-    const { id, place, forecast, warnings, beaches, saved, status, offline, checked, now } = state;
+    const { id, place, forecast, warnings, beaches, saved, status, offline, issued, now } = state;
     const scroller = this.content.querySelector(".hours-scroller");
     const scrollLeft = id === this.renderedId && scroller ? scroller.scrollLeft : 0;
     this.renderedId = id;
@@ -93,7 +93,7 @@ export class ForecastView {
       subtitle: province,
       saved,
       known: place !== null,
-      stale: forecast ? staleNote(checked, now) : null,
+      stale: forecast ? staleNote(issued, now) : null,
     });
 
     if (!forecast) {

@@ -28,7 +28,8 @@
   overflow: hidden;
   font-size: 1.375rem;
   font-weight: 800;
-  line-height: 1.2;
+  /* Tall enough that descenders (g, j, p) are not clipped by the line clamp. */
+  line-height: 1.3;
   letter-spacing: -0.01em;
   overflow-wrap: break-word;
   hyphens: auto;

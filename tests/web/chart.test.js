@@ -9,7 +9,7 @@ import { hoursSummary } from "../../web/scripts/forecast.js";
 const plain = (/** @type {string} */ text) => text.replace(/\u00a0/g, " ");
 import {
   addDays,
-  checkedAt,
+  issuedAt,
   dayName,
   duration,
   localDate,
@@ -89,9 +89,9 @@ test("lines are softened without moving the ends or crossing gaps", () => {
   assert.deepEqual(softened([10, 10, 14, 14, null, 3]), [10, 11, 13, 14, null, 3]);
 });
 
-test("the list shows when the data was last checked", () => {
+test("the list shows when AEMET issued the data", () => {
   const now = Date.parse("2026-11-01T17:30:00+01:00");
   const zone = "Europe/Madrid";
-  assert.equal(checkedAt(Date.parse("2026-11-01T16:58:00+01:00"), now, zone), "Actualizado a las 16:58");
-  assert.match(checkedAt(Date.parse("2026-10-31T09:05:00+01:00"), now, zone), /^Actualizado el 31 oct\.?, 09:05$/);
+  assert.equal(issuedAt(Date.parse("2026-11-01T16:58:00+01:00"), now, zone), "Actualizado a las 16:58");
+  assert.match(issuedAt(Date.parse("2026-10-31T09:05:00+01:00"), now, zone), /^Actualizado el 31 oct\.?, 09:05$/);
 });
