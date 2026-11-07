@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Context, Result, bail};
 use jiff::{
     Timestamp, Zoned,
-    civil::{Date, DateTime},
+    civil::Date,
     tz::{AmbiguousOffset, TimeZone},
 };
 use serde_json::Value;
@@ -35,19 +35,6 @@ pub(super) fn decode_document(bytes: &[u8]) -> String {
         Ok(text) => text.to_owned(),
         Err(_) => decode_iso_8859_15(bytes),
     }
-}
-
-/// AEMET's issue time, a Madrid local time without offset.
-pub(super) fn parse_issued(value: Option<String>) -> Option<Timestamp> {
-    let value = value?;
-    let local = value.get(..19).unwrap_or(&value);
-    let datetime = local.parse::<DateTime>().ok()?;
-    let madrid = MunicipalityTimeZone::EuropeMadrid.rules().ok()?;
-    madrid
-        .to_ambiguous_zoned(datetime)
-        .compatible()
-        .ok()
-        .map(|zoned| zoned.timestamp())
 }
 
 /// `YYYY-MM-DD`, ignoring a time suffix; also accepts `YYYYMMDD`.
@@ -215,7 +202,6 @@ pub(super) fn parse_hourly(document: &Value, expected_id: Option<&str>) -> Resul
     }
 
     Ok(HourlyForecast {
-        issued: parse_issued(field_text(root, "elaborado")),
         id,
         hours,
         windows: windows.into_values().collect(),
@@ -421,7 +407,6 @@ pub(super) fn parse_daily(document: &Value, expected_id: Option<&str>) -> Result
         bail!("daily forecast {id} does not contain any days");
     }
     Ok(DailyForecast {
-        issued: parse_issued(field_text(root, "elaborado")),
         id,
         days: parsed_days,
     })

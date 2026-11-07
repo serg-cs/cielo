@@ -76,52 +76,6 @@
   white-space: nowrap;
 }
 
-/* Old forecast: a small badge at the right end of the header. */
-.stale-badge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.125rem var(--space-2);
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--mono-yellow) 16%, transparent);
-  color: var(--mono-yellow);
-  font-size: 0.75rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.stale-badge[hidden] {
-  display: none;
-}
-
-.stale-short {
-  display: none;
-}
-
-/* As text grows the badge gets shorter, then keeps only its clock, so the
-   name keeps its room. */
-@container (max-width: 21rem) {
-  .stale-long {
-    display: none;
-  }
-
-  .stale-short {
-    display: inline;
-  }
-}
-
-@container (max-width: 15rem) {
-  .stale-short {
-    display: none;
-  }
-
-  .stale-badge {
-    padding: 0.25rem;
-  }
-}
-
 .toast {
   position: absolute;
   inset-inline-end: var(--space-4);

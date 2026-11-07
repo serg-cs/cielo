@@ -141,7 +141,6 @@ pub(crate) struct SunTimes {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HourlyForecast {
     pub(crate) id: String,
-    pub(crate) issued: Option<Timestamp>,
     pub(crate) hours: BTreeMap<Timestamp, HourValues>,
     pub(crate) windows: Vec<ProbabilityWindow>,
     pub(crate) sun: Vec<SunTimes>,
@@ -188,7 +187,6 @@ pub(crate) struct DayForecast {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DailyForecast {
     pub(crate) id: String,
-    pub(crate) issued: Option<Timestamp>,
     pub(crate) days: Vec<DayForecast>,
 }
 
@@ -244,6 +242,5 @@ pub(crate) struct BeachForecast {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) municipality_id: String,
-    pub(crate) issued: Option<Timestamp>,
     pub(crate) days: Vec<BeachDay>,
 }

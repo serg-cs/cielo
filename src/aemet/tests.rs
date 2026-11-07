@@ -84,7 +84,6 @@ fn hourly_document() -> serde_json::Value {
 fn parses_every_hourly_field_and_drops_bad_values() {
     let forecast = parse_hourly(&hourly_document(), Some("28079")).expect("forecast should parse");
 
-    assert_eq!(forecast.issued, Some(madrid("2026-07-19T08:00")));
     let ten = &forecast.hours[&madrid("2026-07-19T10:00")];
     assert_eq!(ten.sky.as_deref(), Some("11"));
     assert_eq!(ten.temperature, Some(27));

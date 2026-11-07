@@ -4,10 +4,11 @@
 
 import { beachSky, sky } from "./codes.js";
 import { DataStore } from "./data-store.js";
-import { replaceChildren, swipeToClose } from "./dom.js";
-import { issuedAt, localDate, localHour } from "./format.js";
+import { identity, replaceChildren, swipeToClose } from "./dom.js";
+import { builtAt, localDate, localHour } from "./format.js";
 import { currentHour, decodeForecast } from "./forecast.js";
 import {
+  BUILD_PATH,
   PLACES_PATH,
   WARNINGS_PATH,
   beachesPath,
@@ -244,6 +245,7 @@ export class App {
       this.restoreScroll();
     }
     void this.store.load(PLACES_PATH, { maxAge: PLACES_MAX_AGE });
+    void this.store.load(BUILD_PATH, { maxAge: FORECAST_MAX_AGE });
     void this.store.load(WARNINGS_PATH, { maxAge: FORECAST_MAX_AGE });
     for (const id of this.saved) this.loadPlace(id);
   }
@@ -436,7 +438,7 @@ export class App {
   beachForecast(id) {
     const document = /** @type {any} */ (this.store.peek(beachesPath(id)).data);
     const beach = document?.beaches?.[id];
-    return beach ? { ...beach, id, issued: beach.issued ?? document.issued } : null;
+    return beach ? { ...beach, id } : null;
   }
 
   /**
@@ -509,7 +511,6 @@ export class App {
           "esta playa",
         ),
         offline,
-        issued: issuedTime(forecast?.issued),
         now,
       });
       document.title = `${beach?.name ?? "Playa"} · Cielo`;
@@ -539,7 +540,6 @@ export class App {
         "este municipio",
       ),
       offline,
-      issued: issuedTime(forecast?.issued),
       now,
     });
     document.title = place ? `${place.name} · Cielo` : "Cielo";
@@ -607,19 +607,16 @@ export class App {
             : "No se pudo cargar la lista de lugares. Inténtalo de nuevo más tarde."
           : "Cargando lugares…";
     }
-    // When AEMET issued the newest forecast among the saved places.
-    let issued = 0;
-    for (const id of this.saved) {
-      const forecast = isBeachId(id) ? this.beachForecast(id) : this.forecast(id);
-      issued = Math.max(issued, issuedTime(forecast?.issued));
-    }
+    // When the published data was last requested from AEMET.
+    const build = /** @type {{built?: string} | null} */ (this.store.peek(BUILD_PATH).data);
+    const built = Date.parse(build?.built ?? "");
     this.locations.update({
       places: this.places,
       beaches: this.beaches,
       saved: this.saved,
       summaries,
       status,
-      updated: issued ? `${issuedAt(issued, now)}${offline ? " · sin conexión" : ""}` : null,
+      updated: Number.isFinite(built) ? `${builtAt(built, now)}${offline ? " · sin conexión" : ""}` : null,
     });
   }
 
@@ -637,7 +634,7 @@ export class App {
       return;
     }
     // Only rebuild an open sheet when its content changed, to keep focus and position.
-    const key = `${formatRoute(route)}|${forecast?.issued?.getTime()}|${warnings.map((warning) => warning.id).join(",")}`;
+    const key = `${formatRoute(route)}|${identity(forecast)}|${warnings.map((warning) => warning.id).join(",")}`;
     if (this.dialog.open && key === this.sheetKey) return;
     this.sheetKey = key;
     const close = () => this.dialog.close();
@@ -695,15 +692,4 @@ function screenOf(route) {
 function historyDepth() {
   const depth = /** @type {{depth?: unknown} | null} */ (history.state)?.depth;
   return typeof depth === "number" && depth > 0 ? depth : 0;
-}
-
-/**
- * AEMET's issue time in ms, or 0 when unknown. Municipality forecasts carry
- * a `Date`, beach forecasts the raw string.
- *
- * @param {Date | string | null | undefined} issued
- */
-function issuedTime(issued) {
-  const time = issued instanceof Date ? issued.getTime() : issued ? Date.parse(issued) : 0;
-  return Number.isFinite(time) ? time : 0;
 }

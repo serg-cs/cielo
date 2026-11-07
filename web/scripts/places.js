@@ -6,6 +6,8 @@ const BUNDLE_SIZE = 20;
 const MAXIMUM_RESULTS = 50;
 
 export const PLACES_PATH = "v4/places.json";
+/** When the data was last requested from AEMET. */
+export const BUILD_PATH = "v4/build.json";
 export const WARNINGS_PATH = "v4/warnings.json";
 
 /** @param {string} id Municipality INE code such as `28079`. */

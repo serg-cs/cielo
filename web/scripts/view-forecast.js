@@ -2,7 +2,7 @@
  * Forecast of one municipality: cards on a scrolling page.
  */
 
-import { beachLinksCard, dailyCard, detailsCard, nowCard, offlineNote, staleNote, warningsBanner } from "./cards.js";
+import { beachLinksCard, dailyCard, detailsCard, nowCard, offlineNote, warningsBanner } from "./cards.js";
 import { hourlyCard } from "./card-hourly.js";
 import { h, identity, preserveFocus, replaceChildren } from "./dom.js";
 import { localDate, localHour } from "./format.js";
@@ -36,7 +36,6 @@ export function warningsKey(warnings) {
  * @property {boolean} saved
  * @property {string | null} status Message when the forecast is missing.
  * @property {boolean} offline
- * @property {number} issued When AEMET issued this forecast (ms), or 0 when unknown.
  * @property {number} now
  */
 
@@ -81,7 +80,7 @@ export class ForecastView {
   /** @param {ForecastState} state */
   render(state) {
     this.state = state;
-    const { id, place, forecast, warnings, beaches, saved, status, offline, issued, now } = state;
+    const { id, place, forecast, warnings, beaches, saved, status, offline, now } = state;
     const scroller = this.content.querySelector(".hours-scroller");
     const scrollLeft = id === this.renderedId && scroller ? scroller.scrollLeft : 0;
     this.renderedId = id;
@@ -93,7 +92,6 @@ export class ForecastView {
       subtitle: province,
       saved,
       known: place !== null,
-      stale: forecast ? staleNote(issued, now) : null,
     });
 
     if (!forecast) {
@@ -115,7 +113,7 @@ export class ForecastView {
       id,
       identity(forecast),
       warningsKey(warnings),
-      beaches.map((beach) => `${beach.id}:${beach.name}:${beach.issued ?? ""}:${identity(beach.days)}`).join(),
+      beaches.map((beach) => `${beach.id}:${beach.name}:${identity(beach.days)}`).join(),
       place?.name ?? "",
       status ?? "",
       offline,

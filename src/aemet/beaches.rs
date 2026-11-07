@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 
 use super::{
-    forecast::{parse_date, parse_issued},
+    forecast::parse_date,
     models::{BeachDay, BeachForecast},
     tree::{field_integer, field_text, list, xml_to_value},
 };
@@ -36,7 +36,6 @@ pub(super) fn parse_beach(xml: &str, beach: &Beach) -> Result<BeachForecast> {
         id: beach.id.clone(),
         name: beach.name.clone(),
         municipality_id: beach.municipality_id.clone(),
-        issued: parse_issued(field_text(root, "elaborado")),
         days,
     })
 }

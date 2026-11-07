@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { staleNote, temperatureGradient, warningTiming } from "../../web/scripts/cards.js";
+import { temperatureGradient, warningTiming } from "../../web/scripts/cards.js";
 
 test("warning timing reads as one span", () => {
   const now = Date.parse("2026-10-31T10:00:00+01:00");
@@ -56,11 +56,4 @@ test("range bars map colours to fixed temperatures", () => {
   assert.match(gradient, /var\(--mono-cyan\) 0\.0%/);
   assert.match(gradient, /var\(--mono-yellow\) 100\.0%/);
   assert.match(temperatureGradient(10, 30), /var\(--mono-cyan\) -50\.0%/);
-});
-
-test("old forecasts are flagged, recent ones are not", () => {
-  const now = Date.parse("2026-11-01T18:00:00+01:00");
-  assert.equal(staleNote(Date.parse("2026-11-01T14:00:00+01:00"), now), null);
-  assert.match(staleNote(Date.parse("2026-11-01T09:00:00+01:00"), now) ?? "", /más de 6\u00a0horas/);
-  assert.equal(staleNote(0, now), null);
 });

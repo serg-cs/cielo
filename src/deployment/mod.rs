@@ -27,6 +27,9 @@ const DEFAULT_REGION: &str = "us-east-1";
 const APP_ENTRY_POINT: &str = "index.html";
 const APP_SERVICE_WORKER: &str = "sw.js";
 const DATA_ENTRY_POINT: &str = "v4/places.json";
+/// When the data was built; uploaded after everything else, so it never
+/// announces a build whose files are not all online yet.
+const DATA_BUILD_STAMP: &str = "v4/build.json";
 /// Local build marker that is never uploaded.
 const DATA_MARKER: &str = ".cielo-data";
 const CONTENT_HASH_LENGTH: usize = 16;
@@ -428,7 +431,10 @@ fn prepare_deployment(input: &Path, kind: DeploymentKind) -> Result<Vec<Deployme
             move_to_end(&mut files, APP_SERVICE_WORKER);
             move_to_end(&mut files, APP_ENTRY_POINT);
         }
-        DeploymentKind::Data => move_to_end(&mut files, DATA_ENTRY_POINT),
+        DeploymentKind::Data => {
+            move_to_end(&mut files, DATA_ENTRY_POINT);
+            move_to_end(&mut files, DATA_BUILD_STAMP);
+        }
     }
 
     Ok(files)
@@ -517,7 +523,7 @@ async fn upload_files(
         .take_while(|file| {
             matches!(
                 file.key.as_str(),
-                APP_ENTRY_POINT | APP_SERVICE_WORKER | DATA_ENTRY_POINT
+                APP_ENTRY_POINT | APP_SERVICE_WORKER | DATA_ENTRY_POINT | DATA_BUILD_STAMP
             )
         })
         .count();

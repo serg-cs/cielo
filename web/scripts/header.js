@@ -22,7 +22,6 @@ export class PlaceHeader {
       h("span", null, "Guardar"),
     );
     this.toast = h("p.toast", { role: "status" });
-    this.stale = h("p.stale-badge", { role: "status", hidden: true });
     this.element = h(
       "header.place-header",
       null,
@@ -36,7 +35,6 @@ export class PlaceHeader {
         icon("chevron-left"),
       ),
       h("div.place-heading", null, this.title, this.subtitle),
-      this.stale,
       this.saveButton,
       this.toast,
     );
@@ -45,22 +43,10 @@ export class PlaceHeader {
   }
 
   /**
-   * @param {{title: string, subtitle: string, saved: boolean, known: boolean, stale?: string | null}} state
+   * @param {{title: string, subtitle: string, saved: boolean, known: boolean}} state
    *   `known` is false while the place is unknown, which hides the save button.
-   *   `stale` is the note for an old forecast, shown as a badge.
    */
-  update({ title, subtitle, saved, known, stale = null }) {
-    this.stale.hidden = !stale;
-    if (stale && this.stale.title !== stale) {
-      this.stale.title = stale;
-      replaceChildren(
-        this.stale,
-        icon("clock", "icon icon-tiny"),
-        h("span.stale-long", { "aria-hidden": "true" }, "Hace más de 6\u00a0h"),
-        h("span.stale-short", { "aria-hidden": "true" }, "+6\u00a0h"),
-        h("span.visually-hidden", null, stale),
-      );
-    }
+  update({ title, subtitle, saved, known }) {
     this.title.textContent = title;
     this.title.title = title;
     this.subtitle.textContent = subtitle;

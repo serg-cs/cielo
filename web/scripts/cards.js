@@ -178,20 +178,6 @@ export function nowCard({ hour, today, summary, status }) {
   );
 }
 
-/** Forecasts older than this are flagged, since AEMET updates them several times a day. */
-const STALE_AFTER = 6 * 3600 * 1000;
-
-/**
- * Note when AEMET issued the forecast more than 6 hours ago, or `null`.
- *
- * @param {number} issued When AEMET issued the forecast (ms), or 0 when unknown.
- * @param {number} now
- */
-export function staleNote(issued, now) {
-  if (!issued || now - issued < STALE_AFTER) return null;
-  return "Previsión elaborada hace más de 6\u00a0horas";
-}
-
 /**
  * Next days with min-max range bars. Each row opens the day sheet.
  *

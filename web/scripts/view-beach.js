@@ -3,7 +3,7 @@
  */
 
 import { beachSky, beachWaves, beachWind, sky, uvCategory } from "./codes.js";
-import { offlineNote, staleNote, temperatureRange, warningsBanner } from "./cards.js";
+import { offlineNote, temperatureRange, warningsBanner } from "./cards.js";
 import { h, icon, identity, infoButton, preserveFocus, replaceChildren } from "./dom.js";
 import { dayMonth, dayName, degrees, localDate, localHour } from "./format.js";
 import { currentHour, daySummary } from "./forecast.js";
@@ -24,7 +24,6 @@ import { RENDER_EVERY, warningsKey } from "./view-forecast.js";
  * @property {boolean} saved
  * @property {string | null} status
  * @property {boolean} offline
- * @property {number} issued When AEMET issued this forecast (ms), or 0 when unknown.
  * @property {number} now
  */
 
@@ -181,7 +180,7 @@ export class BeachView {
   }
 
   /** @param {BeachState} state */
-  render({ id, beach, forecast, municipality, warnings, saved, status, offline, issued, now }) {
+  render({ id, beach, forecast, municipality, warnings, saved, status, offline, now }) {
     this.header.update({
       title: beach?.name ?? forecast?.name ?? "Playa",
       subtitle: beach
@@ -189,7 +188,6 @@ export class BeachView {
         : "Playa",
       saved,
       known: beach !== null,
-      stale: forecast ? staleNote(issued, now) : null,
     });
     const timeZone = beach?.timeZone ?? "Europe/Madrid";
     const today = localDate(now, timeZone);

@@ -1,10 +1,11 @@
 name: Build and deploy data
 
-# Every hour at 17 minutes past. A failed run publishes nothing, so the data
-# online stays as it was until the next run succeeds.
+# Every hour at 43 minutes past, away from the busy start of the hour when
+# GitHub delays scheduled runs most. A failed run publishes nothing, so the
+# data online stays as it was until the next run succeeds.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "43 * * * *"
       timezone: Europe/Madrid
   workflow_dispatch:
   workflow_call:

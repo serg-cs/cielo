@@ -12,7 +12,6 @@ import {
 } from "../../web/scripts/forecast.js";
 
 const raw = {
-  issued: "2026-10-31T09:49:07+01:00",
   meta: { zone: "722802" },
   hourly: {
     t0: "2026-10-31T07:00:00+01:00",
@@ -60,7 +59,6 @@ test("decodes columnar hours one absolute hour apart", () => {
   assert.equal(forecast.hours[1].rain, "Ip");
   assert.equal(forecast.hours[2].pop, 20);
   assert.equal(forecast.hours[2].storm, 5);
-  assert.equal(forecast.issued?.toISOString(), "2026-10-31T08:49:07.000Z");
 });
 
 test("fills a missing sky code from the previous hour", () => {

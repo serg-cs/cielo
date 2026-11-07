@@ -63,7 +63,6 @@ const HALF_DAYS = [
  * @typedef {object} Forecast
  * @property {string} id
  * @property {string} timeZone
- * @property {Date | null} issued
  * @property {{zone?: string, alt?: number}} meta Warning zone and altitude.
  * @property {Hour[]} hours
  * @property {Window[]} windows
@@ -147,7 +146,6 @@ export function decodeForecast(id, raw, timeZone) {
   return {
     id,
     timeZone,
-    issued: raw.issued ? new Date(raw.issued) : null,
     meta: { ...(raw.meta ?? {}) },
     hours,
     windows,

@@ -36,9 +36,9 @@ use crate::{
 use self::{
     coast::{coastal_municipalities, is_coastal_zone},
     documents::{
-        BeachDocument, BeachesDocument, BundleDocument, MetaDocument, MunicipalityDocument,
-        PlacesDocument, ProvinceDocument, SCHEMA_VERSION, WarningDocument, WarningsDocument,
-        local_time,
+        BeachDocument, BeachesDocument, BuildDocument, BundleDocument, MetaDocument,
+        MunicipalityDocument, PlacesDocument, ProvinceDocument, SCHEMA_VERSION, WarningDocument,
+        WarningsDocument, local_time,
     },
     report::{DataBuildReport, ProductStatus, group_failures},
 };
@@ -50,6 +50,7 @@ use super::{
 const BUNDLE_RANGE_SIZE: u16 = 20;
 pub(crate) const SCHEMA_DIRECTORY: &str = "v4";
 pub(crate) const PLACES_FILE: &str = "v4/places.json";
+const BUILD_FILE: &str = "v4/build.json";
 pub(crate) const MARKER_FILE: &str = ".cielo-data";
 /// Largest share of municipalities that may fail before the build is stopped.
 const MAX_FAILED_PERCENT: usize = 5;
@@ -123,13 +124,13 @@ pub(crate) async fn generate_weather_data(
         &catalog,
         forecasts.context("failed to fetch AEMET forecasts")?,
         fire.as_ref(),
-        now,
         &mut writer,
         &mut report,
         &mut failures,
     )?;
     write_warnings(&catalog, warnings, &mut writer, &mut report, &mut failures)?;
-    write_beaches(beaches, now, &mut writer, &mut report, &mut failures)?;
+    write_beaches(beaches, &mut writer, &mut report, &mut failures)?;
+    writer.json(Path::new(BUILD_FILE), &build_document(now)?)?;
     writer.json(
         Path::new(MARKER_FILE),
         &MarkerDocument {
@@ -161,6 +162,16 @@ pub(crate) async fn generate_weather_data(
     })
 }
 
+/// `v4/build.json`, stamped with `requested`: when the build asked AEMET for
+/// its data, shown in the app as "Actualizado". It changes on every build,
+/// so it is uploaded on every deployment.
+fn build_document(requested: Timestamp) -> Result<BuildDocument> {
+    Ok(BuildDocument {
+        schema: SCHEMA_VERSION,
+        built: local_time(requested, &MunicipalityTimeZone::EuropeMadrid.rules()?),
+    })
+}
+
 async fn fetch_forecasts(client: &AemetClient) -> Result<Forecasts> {
     let (hourly, daily) = tokio::try_join!(client.hourly_forecasts(), client.daily_forecasts())?;
     let mut failures = hourly.failures;
@@ -179,7 +190,6 @@ fn write_forecasts(
     catalog: &Catalog,
     forecasts: Forecasts,
     fire: Option<&FireForecast>,
-    now: Timestamp,
     writer: &mut Writer,
     report: &mut DataBuildReport,
     failures: &mut Vec<EntryFailure>,
@@ -217,17 +227,8 @@ fn write_forecasts(
         .copied()
         .collect::<BTreeSet<_>>();
 
-    // Stamped with AEMET's latest issue time, not the build time, so an
-    // unchanged list is byte-for-byte identical and is not uploaded again.
-    let latest_issue = hourly
-        .values()
-        .filter_map(|forecast| forecast.issued)
-        .chain(daily.values().filter_map(|forecast| forecast.issued))
-        .max()
-        .unwrap_or(now);
     let mut places = PlacesDocument {
         schema: SCHEMA_VERSION,
-        issued: local_time(latest_issue, &MunicipalityTimeZone::EuropeMadrid.rules()?),
         ..PlacesDocument::default()
     };
     let mut bundles = BTreeMap::<PathBuf, BTreeMap<&str, MunicipalityDocument>>::new();
@@ -380,7 +381,6 @@ fn write_warnings(
 /// Write `beaches/<PP>.json`, one file per province, unless too many beaches failed.
 fn write_beaches(
     beaches: (Vec<BeachForecast>, Vec<EntryFailure>),
-    now: Timestamp,
     writer: &mut Writer,
     report: &mut DataBuildReport,
     failures: &mut Vec<EntryFailure>,
@@ -398,31 +398,19 @@ fn write_beaches(
     }
 
     let mut provinces = BTreeMap::<&str, BTreeMap<&str, BeachDocument>>::new();
-    let mut latest = BTreeMap::<&str, Timestamp>::new();
     for forecast in &forecasts {
-        let province = &forecast.municipality_id[..2];
-        let time_zone =
-            MunicipalityTimeZone::for_municipality(&forecast.municipality_id).rules()?;
         provinces
-            .entry(province)
+            .entry(&forecast.municipality_id[..2])
             .or_default()
-            .insert(&forecast.id, BeachDocument::new(forecast, &time_zone));
-        if let Some(issued) = forecast.issued {
-            let entry = latest.entry(province).or_insert(issued);
-            *entry = (*entry).max(issued);
-        }
+            .insert(&forecast.id, BeachDocument::new(forecast));
     }
-    let madrid = MunicipalityTimeZone::EuropeMadrid.rules()?;
     for (province, beaches) in provinces {
-        // AEMET's issue time, so an unchanged file is not uploaded again.
-        let issued = latest.get(province).copied().unwrap_or(now);
         writer.json(
             &Path::new(SCHEMA_DIRECTORY)
                 .join("beaches")
                 .join(format!("{province}.json")),
             &BeachesDocument {
                 schema: SCHEMA_VERSION,
-                issued: local_time(issued, &madrid),
                 beaches,
             },
         )?;

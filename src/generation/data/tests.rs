@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    bundle_path,
+    build_document, bundle_path,
     coast::{coastal_municipalities, distance_to_polygon_km},
     documents::{MetaDocument, MunicipalityDocument},
     report::{DataBuildReport, ProductStatus, group_failures},
@@ -20,6 +20,16 @@ use super::{
 
 fn utc(value: &str) -> Timestamp {
     value.parse().expect("test time should parse")
+}
+
+#[test]
+fn stamps_the_build_with_the_aemet_request_time_in_madrid() {
+    let document = build_document(utc("2026-11-07T15:17:04.6Z")).expect("build document");
+
+    assert_eq!(
+        serde_json::to_value(&document).expect("document serializes"),
+        json!({"schema": 4, "built": "2026-11-07T16:17:05+01:00"})
+    );
 }
 
 #[test]
@@ -73,7 +83,6 @@ fn writes_columnar_hours_windows_and_daily_periods() {
         .expect("time");
     let hourly = HourlyForecast {
         id: "28079".to_owned(),
-        issued: Some(utc("2026-10-31T08:49:07Z")),
         hours,
         windows: vec![crate::aemet::ProbabilityWindow {
             start,
@@ -100,7 +109,6 @@ fn writes_columnar_hours_windows_and_daily_periods() {
     );
     let daily = DailyForecast {
         id: "28079".to_owned(),
-        issued: Some(utc("2026-10-31T09:00:00Z")),
         days: vec![DayForecast {
             date: date(2026, 10, 31),
             temperature: DailyRange {
@@ -140,7 +148,6 @@ fn writes_columnar_hours_windows_and_daily_periods() {
     assert_eq!(
         serde_json::to_value(&document).expect("document serializes"),
         json!({
-            "issued": "2026-10-31T10:00:00+01:00",
             "meta": {"zone": "722802", "alt": 657},
             "hourly": {
                 "t0": "2026-10-31T07:00:00+01:00",
@@ -188,7 +195,6 @@ fn hourly_columns_span_the_clock_change_in_absolute_hours() {
         .collect::<BTreeMap<_, _>>();
     let hourly = HourlyForecast {
         id: "28079".to_owned(),
-        issued: None,
         hours,
         windows: vec![],
         sun: vec![],

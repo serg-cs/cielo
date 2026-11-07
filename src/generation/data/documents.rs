@@ -38,7 +38,6 @@ pub(super) struct ProvinceDocument {
 #[derive(Debug, Default, Serialize)]
 pub(super) struct PlacesDocument {
     pub(super) schema: u8,
-    pub(super) issued: String,
     pub(super) provinces: Vec<ProvinceDocument>,
     pub(super) ids: Vec<String>,
     pub(super) names: Vec<String>,
@@ -215,8 +214,6 @@ pub(super) struct DayDocument<'a> {
 /// One municipality inside a forecast bundle.
 #[derive(Debug, Serialize)]
 pub(super) struct MunicipalityDocument<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) issued: Option<String>,
     pub(super) meta: MetaDocument<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hourly: Option<HourlyColumns<'a>>,
@@ -234,10 +231,6 @@ impl<'a> MunicipalityDocument<'a> {
         fire: Option<&FireDanger>,
         time_zone: &TimeZone,
     ) -> Self {
-        let issued = hourly
-            .and_then(|forecast| forecast.issued)
-            .max(daily.and_then(|forecast| forecast.issued))
-            .map(|issued| local_time(issued, time_zone));
         let windows = hourly
             .map(|forecast| {
                 forecast
@@ -295,7 +288,6 @@ impl<'a> MunicipalityDocument<'a> {
             })
             .unwrap_or_default();
         Self {
-            issued,
             meta,
             hourly: hourly.and_then(|forecast| HourlyColumns::new(&forecast.hours, time_zone)),
             windows,
@@ -394,15 +386,12 @@ pub(super) struct BeachDayDocument {
 /// One beach's forecast; its name and municipality are in `places.json`.
 #[derive(Debug, Serialize)]
 pub(super) struct BeachDocument {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) issued: Option<String>,
     pub(super) days: Vec<BeachDayDocument>,
 }
 
 impl BeachDocument {
-    pub(super) fn new(beach: &BeachForecast, time_zone: &TimeZone) -> Self {
+    pub(super) fn new(beach: &BeachForecast) -> Self {
         Self {
-            issued: beach.issued.map(|issued| local_time(issued, time_zone)),
             days: beach
                 .days
                 .iter()
@@ -425,6 +414,12 @@ impl BeachDocument {
 #[derive(Debug, Serialize)]
 pub(super) struct BeachesDocument<'a> {
     pub(super) schema: u8,
-    pub(super) issued: String,
     pub(super) beaches: BTreeMap<&'a str, BeachDocument>,
+}
+
+/// `v4/build.json`: when the build requested its data from AEMET.
+#[derive(Debug, Serialize)]
+pub(super) struct BuildDocument {
+    pub(super) schema: u8,
+    pub(super) built: String,
 }

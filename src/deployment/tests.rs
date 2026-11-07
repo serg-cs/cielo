@@ -69,6 +69,28 @@ fn prepares_data_with_places_last_and_without_the_marker() {
 }
 
 #[test]
+fn prepares_data_with_the_build_stamp_after_places() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let input = data_input(root.path());
+    write(&input, "v4/build.json", "{\"schema\":4,\"built\":\"\"}");
+    let files = prepare(&input, DeploymentKind::Data).expect("data should prepare");
+    let keys = files
+        .iter()
+        .map(|file| file.key.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        keys,
+        [
+            "v4/forecast/28/060.json",
+            "v4/warnings.json",
+            "v4/places.json",
+            "v4/build.json"
+        ]
+    );
+}
+
+#[test]
 fn plans_only_changed_files_and_scoped_deletions() {
     let root = tempfile::tempdir().expect("temporary root");
     let files = prepare(&data_input(root.path()), DeploymentKind::Data).expect("prepare");
